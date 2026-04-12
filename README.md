@@ -1,3 +1,7 @@
+[![Latest Version](https://img.shields.io/packagist/v/laraigent/larai-kit.svg)](https://packagist.org/packages/laraigent/larai-kit)
+[![Total Downloads](https://img.shields.io/packagist/dt/laraigent/larai-kit.svg)](https://packagist.org/packages/laraigent/larai-kit)
+[![License](https://img.shields.io/packagist/l/laraigent/larai-kit.svg)](LICENSE)
+
 # LarAI Kit
 
 **The missing AI toolkit for Laravel.** Add RAG, agents, document ingestion, and vector search to any Laravel app in under 5 minutes.
