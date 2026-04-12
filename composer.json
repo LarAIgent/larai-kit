@@ -1,0 +1,38 @@
+{
+    "name": "laraigent/larai-kit",
+    "description": "The missing AI toolkit for Laravel - agents, RAG, vector search, document ingestion with Pinecone and pgvector support.",
+    "type": "library",
+    "license": "MIT",
+    "version": "0.1.0",
+    "keywords": ["laravel", "ai", "agent", "rag", "pinecone", "pgvector", "openai", "embeddings", "vector-search", "chatbot"],
+    "homepage": "https://github.com/LarAIgent/larai-kit",
+    "authors": [
+        {
+            "name": "LarAIgent",
+            "homepage": "https://github.com/LarAIgent"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "laravel/framework": "^12.0|^13.0",
+        "laravel/ai": "^0.4"
+    },
+    "suggest": {
+        "smalot/pdfparser": "Required for PDF document parsing (^2.0|^3.0)",
+        "phpoffice/phpword": "Required for DOCX document parsing (^1.3)"
+    },
+    "autoload": {
+        "psr-4": {
+            "LarAIgent\\AiKit\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "LarAIgent\\AiKit\\AiKitServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

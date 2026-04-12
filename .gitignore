@@ -1,0 +1,7 @@
+/vendor/
+/node_modules/
+.phpunit.result.cache
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
