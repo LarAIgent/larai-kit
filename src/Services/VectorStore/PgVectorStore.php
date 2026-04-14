@@ -11,30 +11,44 @@ class PgVectorStore implements VectorStore
 {
     public function upsert(int $chunkId, array $embedding, array $metadata = []): void
     {
-        Document::updateOrCreate(
-            ['id' => $metadata['document_id'] ?? null],
-            [
-                'content' => $metadata['content'] ?? '',
-                'embedding' => $embedding,
-                'source_name' => $metadata['source_name'] ?? null,
-                'source_type' => $metadata['source_type'] ?? null,
-                'source_url' => $metadata['source_url'] ?? null,
-                'source_meta' => array_filter($metadata, fn ($v) => $v !== null),
-            ]
-        );
+        $this->upsertMany([
+            ['chunk_id' => $chunkId, 'embedding' => $embedding, 'metadata' => $metadata],
+        ]);
     }
 
-    public function search(array $embedding, int $limit = 5, float $threshold = 0.4): Collection
+    public function upsertMany(array $items): void
     {
-        $documents = Document::query()
-            ->whereNotNull('embedding')
+        foreach ($items as $item) {
+            $meta = array_filter($item['metadata'] ?? [], fn ($v) => $v !== null);
+
+            Document::create([
+                'content' => $meta['content'] ?? '',
+                'embedding' => $item['embedding'],
+                'source_name' => $meta['source_name'] ?? null,
+                'source_type' => $meta['source_type'] ?? null,
+                'source_url' => $meta['source_url'] ?? null,
+                'source_meta' => $meta,
+            ]);
+        }
+    }
+
+    public function search(array $embedding, int $limit = 5, float $threshold = 0.4, array $scope = []): Collection
+    {
+        $query = Document::query()->whereNotNull('embedding');
+
+        // Apply tenant scope via source_meta JSON filtering
+        foreach ($scope as $key => $value) {
+            $query->where("source_meta->{$key}", $value);
+        }
+
+        $documents = $query
             ->whereVectorSimilarTo('embedding', $embedding)
             ->limit($limit)
             ->get();
 
         return $documents->map(fn (Document $doc) => [
             'chunk_id' => $doc->id,
-            'score' => 1.0, // pgvector orders by similarity, exact score not returned by default
+            'score' => 1.0,
             'content' => $doc->content,
             'metadata' => [
                 'source_name' => $doc->source_name,

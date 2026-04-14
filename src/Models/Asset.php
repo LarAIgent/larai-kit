@@ -20,11 +20,13 @@ class Asset extends Model
         'size_bytes',
         'checksum',
         'tags',
+        'scope',
     ];
 
     protected $casts = [
         'size_bytes' => 'integer',
         'tags' => 'array',
+        'scope' => 'array',
     ];
 
     public function chunks(): HasMany

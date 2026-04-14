@@ -5,8 +5,10 @@ namespace LarAIgent\AiKit\Services\Ingestion;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Str;
 use LarAIgent\AiKit\Contracts\FileStorage;
+use LarAIgent\AiKit\Jobs\EmbedChunksJob;
 use LarAIgent\AiKit\Jobs\ParseAssetJob;
 use LarAIgent\AiKit\Models\Asset;
+use LarAIgent\AiKit\Models\Chunk;
 use LarAIgent\AiKit\Models\Ingestion;
 use LarAIgent\AiKit\Services\Ingestion\Parsers\ParserRegistry;
 use RuntimeException;
@@ -19,9 +21,11 @@ class IngestionService
     ) {}
 
     /**
-     * Ingest a file upload: validate, store, create records, dispatch pipeline.
+     * Ingest a file upload.
+     *
+     * @param array<string, mixed> $scope  Tenant scope (e.g. ['chatbot_id' => 42])
      */
-    public function ingestFile(UploadedFile $file): Asset
+    public function ingestFile(UploadedFile $file, array $scope = []): Asset
     {
         $this->validateFile($file);
 
@@ -38,6 +42,7 @@ class IngestionService
             'mime' => $file->getClientMimeType(),
             'size_bytes' => $file->getSize(),
             'checksum' => $checksum,
+            'scope' => ! empty($scope) ? $scope : null,
         ]);
 
         $ingestion = Ingestion::create([
@@ -45,15 +50,17 @@ class IngestionService
             'state' => 'queued',
         ]);
 
-        ParseAssetJob::dispatch($asset, $ingestion);
+        ParseAssetJob::dispatch($asset, $ingestion, $scope);
 
         return $asset;
     }
 
     /**
-     * Ingest raw text content directly.
+     * Ingest raw text content.
+     *
+     * @param array<string, mixed> $scope  Tenant scope (e.g. ['chatbot_id' => 42])
      */
-    public function ingestText(string $content, string $name = 'Manual entry'): Asset
+    public function ingestText(string $content, string $name = 'Manual entry', array $scope = []): Asset
     {
         if (empty(trim($content))) {
             throw new RuntimeException('Content cannot be empty.');
@@ -65,6 +72,7 @@ class IngestionService
             'mime' => 'text/plain',
             'size_bytes' => strlen($content),
             'checksum' => md5($content),
+            'scope' => ! empty($scope) ? $scope : null,
         ]);
 
         $ingestion = Ingestion::create([
@@ -72,7 +80,6 @@ class IngestionService
             'state' => 'queued',
         ]);
 
-        // For raw text, skip file parse step — go directly to chunking
         $ingestion->markState('parsing');
 
         $chunker = app(Chunker::class);
@@ -87,7 +94,7 @@ class IngestionService
 
         $chunkIds = [];
         foreach ($chunks as $chunk) {
-            $model = \LarAIgent\AiKit\Models\Chunk::create([
+            $model = Chunk::create([
                 'asset_id' => $asset->id,
                 'content' => $chunk['text'],
                 'chunk_index' => $chunk['chunk_index'],
@@ -98,7 +105,7 @@ class IngestionService
 
         $ingestion->update(['chunk_count' => count($chunkIds)]);
 
-        \LarAIgent\AiKit\Jobs\EmbedChunksJob::dispatch($asset, $ingestion, $chunkIds);
+        EmbedChunksJob::dispatch($asset, $ingestion, $chunkIds, $scope);
 
         return $asset;
     }
@@ -116,20 +123,23 @@ class IngestionService
         $mime = $file->getClientMimeType();
 
         if (! empty($allowed) && ! in_array($mime, $allowed, true)) {
-            throw new RuntimeException("File type not allowed: {$mime}");
+            throw new RuntimeException(
+                "File type not allowed: {$mime}. Allowed: " . implode(', ', $allowed)
+            );
         }
 
         if (! $this->parserRegistry->supports($mime)) {
-            throw new RuntimeException("No parser available for file type: {$mime}");
+            $supported = implode(', ', $this->parserRegistry->allSupportedMimeTypes());
+            throw new RuntimeException(
+                "No parser available for file type: {$mime}. Supported: {$supported}. "
+                . "Install smalot/pdfparser for PDF or phpoffice/phpword for DOCX."
+            );
         }
     }
 
     protected function sanitizeFilename(string $name): string
     {
-        // Strip path separators and null bytes
         $name = str_replace(['/', '\\', "\0"], '', $name);
-
-        // Remove any non-ASCII characters except basic punctuation
         $name = preg_replace('/[^\w.\-\s]/', '', $name);
 
         return Str::limit(trim($name), 255, '');

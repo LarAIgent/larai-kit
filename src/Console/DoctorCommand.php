@@ -7,26 +7,30 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Storage;
+use LarAIgent\AiKit\Contracts\EmbeddingProvider;
 use LarAIgent\AiKit\Services\FeatureDetector;
 use Throwable;
 
 class DoctorCommand extends Command
 {
-    protected $signature = 'larai:doctor';
-    protected $description = 'Check the health of all LarAIgent services';
+    protected $signature = 'larai:doctor {--deep : Run live API tests (embedding + vector store)}';
+    protected $description = 'Check the health of all LarAI Kit services';
 
     public function handle(FeatureDetector $features): int
     {
-        $this->info('LarAIgent Health Check');
+        $this->info('LarAI Kit Health Check');
         $this->newLine();
 
         $hasError = false;
+        $deep = $this->option('deep');
 
         // Database
         $db = config('database.default');
         try {
+            $start = microtime(true);
             DB::select('select 1');
-            $this->ok("Database ({$db})");
+            $ms = round((microtime(true) - $start) * 1000, 1);
+            $this->ok("Database ({$db})", "{$ms}ms");
         } catch (Throwable $e) {
             $this->printFail("Database ({$db})", $e->getMessage());
             $hasError = true;
@@ -37,26 +41,48 @@ class DoctorCommand extends Command
         if ($features->aiProviderReady()) {
             $this->ok("AI Provider ({$provider})");
         } else {
-            $this->printFail("AI Provider ({$provider})", 'missing API key');
+            $this->printFail("AI Provider ({$provider})", "missing API key — set " . strtoupper($provider) . '_API_KEY in .env');
             $hasError = true;
+        }
+
+        // Deep: live embedding test
+        if ($deep && $features->aiProviderReady()) {
+            try {
+                $embedder = app(EmbeddingProvider::class);
+                $start = microtime(true);
+                $vector = $embedder->embed('hello world');
+                $ms = round((microtime(true) - $start) * 1000);
+                $dims = count($vector);
+                $expected = $embedder->dimensions();
+
+                if ($dims === $expected) {
+                    $this->ok("Embedding probe", "{$dims} dims, {$ms}ms");
+                } else {
+                    $this->printFail("Embedding probe", "Expected {$expected} dims, got {$dims}");
+                    $hasError = true;
+                }
+            } catch (Throwable $e) {
+                $this->printFail("Embedding probe", $e->getMessage());
+                $hasError = true;
+            }
         }
 
         // Vector Store
         $driver = $features->vectorStoreDriver();
         if ($driver === 'none') {
-            $this->skip('Vector Store', 'disabled (set to none)');
+            $this->skip('Vector Store', 'disabled (LARAI_VECTOR_STORE=none)');
         } elseif ($driver === 'pinecone') {
             if ($features->pineconeReady()) {
                 $this->ok('Vector Store (Pinecone)');
             } else {
-                $this->printFail('Vector Store (Pinecone)', 'missing PINECONE_API_KEY or PINECONE_INDEX_HOST');
+                $this->printFail('Vector Store (Pinecone)', 'set PINECONE_API_KEY and PINECONE_INDEX_HOST in .env');
                 $hasError = true;
             }
         } elseif ($driver === 'pgvector') {
             if ($features->pgvectorReady()) {
                 $this->ok('Vector Store (pgvector)');
             } else {
-                $this->printFail('Vector Store (pgvector)', 'pgsql + pgvector extension required');
+                $this->printFail('Vector Store (pgvector)', 'requires DB_CONNECTION=pgsql + pgvector extension');
                 $hasError = true;
             }
         }
@@ -97,7 +123,7 @@ class DoctorCommand extends Command
         if ($features->queueEnabled()) {
             $this->ok("Queue ({$queueDriver})");
         } else {
-            $this->skip("Queue ({$queueDriver})", 'sync mode — jobs run inline');
+            $this->skip("Queue ({$queueDriver})", 'sync mode — run php artisan queue:work for background processing');
         }
 
         // Summary
@@ -110,12 +136,18 @@ class DoctorCommand extends Command
         $this->line("  RAG:           " . ($features->ragEnabled() ? 'enabled' : 'disabled'));
         $this->line("  S3:            " . ($features->s3Enabled() ? 'enabled' : 'disabled'));
 
+        if (! $deep) {
+            $this->newLine();
+            $this->line('<fg=gray>  Tip: run with --deep to test live API calls (embedding + vector store)</>' );
+        }
+
         return $hasError ? self::FAILURE : self::SUCCESS;
     }
 
-    private function ok(string $name): void
+    private function ok(string $name, ?string $detail = null): void
     {
-        $this->line("  <fg=green>[OK]</>      {$name}");
+        $suffix = $detail ? " <fg=gray>({$detail})</>" : '';
+        $this->line("  <fg=green>[OK]</>      {$name}{$suffix}");
     }
 
     private function printFail(string $name, ?string $note = null): void

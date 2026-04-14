@@ -1,6 +1,6 @@
 # Vector Stores
 
-LarAI Kit supports multiple vector store backends. Switch between them via `.env` - no code changes.
+LarAI Kit supports multiple vector store backends. Switch between them via `.env` — no code changes.
 
 ## Choosing a Vector Store
 
@@ -12,14 +12,12 @@ LarAI Kit supports multiple vector store backends. Switch between them via `.env
 
 ## Pinecone
 
-Works with **MySQL or PostgreSQL**. Vectors stored in Pinecone's cloud, document metadata stored in your database.
+Works with **MySQL or PostgreSQL**. Vectors stored in Pinecone's cloud.
 
 ### Setup
 
 1. Create account at [pinecone.io](https://pinecone.io)
-2. Create an index:
-   - Dimensions: `1536`
-   - Metric: `cosine`
+2. Create an index: Dimensions `1536`, Metric `cosine`
 3. Add to `.env`:
 
 ```env
@@ -28,49 +26,29 @@ PINECONE_API_KEY=pcsk_your-key
 PINECONE_INDEX_HOST=https://your-index-abc123.svc.pinecone.io
 ```
 
-### How it works
+### Features
 
-- Embeddings are generated via OpenAI and sent to Pinecone
-- Search queries are embedded and matched against Pinecone's index
-- Document metadata (source name, URL, content preview) stored as Pinecone metadata
-- No extra composer packages needed - uses Laravel's HTTP client
+- **Batch upsert** — up to 100 vectors per API call via `upsertMany()`
+- **Retry with backoff** — automatic retry on 429/5xx with exponential backoff and jitter
+- **Scoped search** — scope parameters translate to Pinecone metadata `$eq` filters for multi-tenant isolation
+- **Zero dependencies** — uses Laravel's built-in `Http` facade
 
-### Free tier limits
+### Free tier
 
-- 100K vectors
-- 1 index
-- Enough for most development and small production apps
+100K vectors, 1 index — enough for development and small production apps.
 
 ## pgvector
 
-Self-hosted vector search using PostgreSQL's pgvector extension. No external services.
-
-### Setup
+Self-hosted vector search using PostgreSQL's pgvector extension.
 
 ```env
 DB_CONNECTION=pgsql
 LARAI_VECTOR_STORE=pgvector
 ```
 
-Requires:
-- PostgreSQL 14+
-- pgvector extension installed
+### Scoped search
 
-Linux:
-```bash
-sudo apt install postgresql-17-pgvector
-```
-
-Docker:
-```bash
-docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=secret pgvector/pgvector:pg17
-```
-
-### How it works
-
-- Embeddings stored directly in `ai_documents.embedding` column (vector type)
-- Search uses `whereVectorSimilarTo()` from Laravel's query builder
-- Everything in one database - no external service dependency
+Scope parameters translate to `WHERE source_meta->key = value` JSON queries.
 
 ## None (disable RAG)
 
@@ -78,17 +56,24 @@ docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=secret pgvector/pgvector:pg17
 LARAI_VECTOR_STORE=none
 ```
 
-Chat still works but without document context. Ingestion is disabled. The `NullVectorStore` silently no-ops all operations.
+Chat still works but without document context. The `NullVectorStore` silently no-ops all operations.
 
-## Switching Between Stores
+## Multi-Tenant Scoping
 
-```bash
-# Edit .env: LARAI_VECTOR_STORE=pgvector
-php artisan config:clear
-php artisan larai:doctor
+Both Pinecone and pgvector support scoped queries to prevent data leaks between tenants:
+
+```php
+// Ingest with scope
+$ingestion->ingestText($content, scope: ['chatbot_id' => 42]);
+
+// Retrieve with same scope — only returns that tenant's documents
+$retrieval->retrieve($query, scope: ['chatbot_id' => 42]);
+
+// ChatService with scope
+$chat->sendMessage($message, scope: ['chatbot_id' => 42]);
 ```
 
-Note: Vectors in Pinecone won't be in pgvector and vice versa. If switching, you'll need to re-ingest your documents.
+**Without scope, queries are global.** Always pass scope in multi-tenant applications.
 
 ## Custom Vector Store
 
@@ -96,17 +81,36 @@ Implement the `VectorStore` contract:
 
 ```php
 use LarAIgent\AiKit\Contracts\VectorStore;
+use Illuminate\Support\Collection;
 
-class MyCustomStore implements VectorStore
+class WeaviateVectorStore implements VectorStore
 {
     public function upsert(int $chunkId, array $embedding, array $metadata = []): void { ... }
-    public function search(array $embedding, int $limit = 5, float $threshold = 0.4): Collection { ... }
+    public function upsertMany(array $items): void { ... }
+    public function search(array $embedding, int $limit = 5, float $threshold = 0.4, array $scope = []): Collection { ... }
     public function delete(array $chunkIds): void { ... }
 }
 ```
 
-Bind it in a service provider:
+Bind in a service provider:
 
 ```php
-$this->app->singleton(VectorStore::class, MyCustomStore::class);
+$this->app->singleton(VectorStore::class, WeaviateVectorStore::class);
 ```
+
+## Batch Operations
+
+Both `upsertMany()` and `embedMany()` support batched operations:
+
+```php
+// Embedding: batch all texts in one API call
+$embedder->embedMany(['text 1', 'text 2', 'text 3']);
+
+// Vector store: batch upsert (Pinecone does 100/request)
+$store->upsertMany([
+    ['chunk_id' => 1, 'embedding' => [...], 'metadata' => [...]],
+    ['chunk_id' => 2, 'embedding' => [...], 'metadata' => [...]],
+]);
+```
+
+The ingestion pipeline uses both automatically — you don't need to call these directly.

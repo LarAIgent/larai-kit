@@ -18,50 +18,83 @@ class EmbedChunksJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    public int $timeout = 300; // 5 minutes — embedding can be slow
+
     public function __construct(
         public readonly Asset $asset,
         public readonly Ingestion $ingestion,
         /** @var array<int, int> */
         public readonly array $chunkIds,
+        public readonly array $scope = [],
     ) {}
 
     public function handle(EmbeddingProvider $embedder, VectorStore $vectorStore): void
     {
+        set_time_limit(0); // Prevent PHP timeout for sync queue
+
         $this->ingestion->markState('embedding');
 
         try {
             $chunks = Chunk::whereIn('id', $this->chunkIds)->get();
 
-            foreach ($chunks as $chunk) {
-                $embedding = $embedder->embed($chunk->content);
+            if ($chunks->isEmpty()) {
+                $this->ingestion->markState('failed', 'No chunks found to embed.');
+                return;
+            }
 
-                // Store embedding on the chunk record (for pgvector if column exists)
+            // Batch embed all texts at once
+            $texts = $chunks->pluck('content')->all();
+            $embeddings = $embedder->embedMany($texts);
+
+            // Prepare batch upsert items
+            $upsertItems = [];
+            foreach ($chunks->values() as $i => $chunk) {
+                $embedding = $embeddings[$i] ?? [];
+
+                if (empty($embedding)) {
+                    continue;
+                }
+
+                // Store on chunk record (for pgvector if column exists)
                 try {
                     $chunk->update(['embedding' => $embedding]);
                 } catch (\Throwable) {
-                    // Embedding column may not exist on MySQL — that's fine
+                    // Embedding column may not exist on MySQL
                 }
 
                 // Build metadata — never pass null values
                 $metadata = array_filter([
-                    'content' => $chunk->content,
+                    'content' => mb_substr($chunk->content, 0, 500), // Pinecone metadata limit
                     'asset_id' => $this->asset->id,
                     'chunk_id' => $chunk->id,
                     'chunk_index' => $chunk->chunk_index,
                     'source_name' => $this->asset->source_name,
                     'source_type' => $this->asset->source_type,
                     'source_url' => $this->asset->source_url,
-                    'source_disk' => $this->asset->source_disk,
-                    'source_path' => $this->asset->source_path,
                     'mime' => $this->asset->mime,
-                    'size_bytes' => $this->asset->size_bytes,
-                    'page' => $chunk->page,
                 ], fn ($v) => $v !== null);
 
-                // Upsert into the configured vector store (Pinecone or pgvector)
-                $vectorStore->upsert($chunk->id, $embedding, $metadata);
+                // Merge scope into metadata for tenant filtering
+                foreach ($this->scope as $key => $value) {
+                    $metadata[$key] = $value;
+                }
+
+                $upsertItems[] = [
+                    'chunk_id' => $chunk->id,
+                    'embedding' => $embedding,
+                    'metadata' => $metadata,
+                ];
             }
 
+            if (empty($upsertItems)) {
+                $this->ingestion->markState('failed', 'All embeddings were empty.');
+                return;
+            }
+
+            // Batch upsert to vector store
+            $vectorStore->upsertMany($upsertItems);
+
+            $this->ingestion->update(['chunk_count' => count($upsertItems)]);
             $this->ingestion->markState('indexed');
 
         } catch (Throwable $e) {

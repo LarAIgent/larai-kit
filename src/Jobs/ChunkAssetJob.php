@@ -21,6 +21,7 @@ class ChunkAssetJob implements ShouldQueue
         public readonly Asset $asset,
         public readonly Ingestion $ingestion,
         public readonly string $text,
+        public readonly array $scope = [],
     ) {}
 
     public function handle(Chunker $chunker): void
@@ -35,19 +36,20 @@ class ChunkAssetJob implements ShouldQueue
                 return;
             }
 
-            $chunkModels = [];
+            $chunkIds = [];
             foreach ($chunks as $chunk) {
-                $chunkModels[] = Chunk::create([
+                $model = Chunk::create([
                     'asset_id' => $this->asset->id,
                     'content' => $chunk['text'],
                     'chunk_index' => $chunk['chunk_index'],
                     'created_at' => now(),
                 ]);
+                $chunkIds[] = $model->id;
             }
 
-            $this->ingestion->update(['chunk_count' => count($chunkModels)]);
+            $this->ingestion->update(['chunk_count' => count($chunkIds)]);
 
-            EmbedChunksJob::dispatch($this->asset, $this->ingestion, collect($chunkModels)->pluck('id')->all());
+            EmbedChunksJob::dispatch($this->asset, $this->ingestion, $chunkIds, $this->scope);
 
         } catch (Throwable $e) {
             $this->ingestion->markState('failed', $e->getMessage());

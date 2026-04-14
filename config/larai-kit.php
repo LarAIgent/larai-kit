@@ -97,4 +97,16 @@ return [
 
     'conversation_history_turns' => (int) env('LARAI_HISTORY_TURNS', 10),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Retry / Backoff (for API rate-limits and 5xx errors)
+    |--------------------------------------------------------------------------
+    */
+
+    'retry' => [
+        'max_attempts' => (int) env('LARAI_RETRY_MAX', 3),
+        'base_delay_ms' => (int) env('LARAI_RETRY_DELAY_MS', 1000),
+        'on_status' => [429, 500, 502, 503, 504],
+    ],
+
 ];

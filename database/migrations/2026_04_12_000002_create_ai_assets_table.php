@@ -18,8 +18,11 @@ return new class extends Migration
             $table->string('mime')->nullable();
             $table->unsignedBigInteger('size_bytes')->nullable();
             $table->string('checksum', 64)->nullable();
-            $table->jsonb('tags')->nullable();
+            $table->json('tags')->nullable();
+            $table->json('scope')->nullable();
             $table->timestamps();
+
+            $table->index('source_type');
         });
     }
 

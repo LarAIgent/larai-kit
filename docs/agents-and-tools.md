@@ -2,17 +2,19 @@
 
 LarAI Kit builds on [Laravel's AI SDK](https://laravel.com/blog/introducing-the-laravel-ai-sdk) agent system.
 
+> **Namespace:** `LarAIgent\AiKit\...` (case-sensitive on Linux).
+
 ## Built-in Agents
 
 ### SupportAgent
 
-A RAG-enabled agent that uses your knowledge base to answer questions:
+A RAG-enabled agent that uses your knowledge base:
 
 ```php
 use LarAIgent\AiKit\Agents\SupportAgent;
 
 $response = (new SupportAgent())->prompt('How do I reset my password?');
-echo $response; // Answer with context from your documents
+echo $response;
 ```
 
 ### BookingAgent
@@ -23,12 +25,44 @@ An agent with tool-calling capability:
 use LarAIgent\AiKit\Agents\BookingAgent;
 
 $response = (new BookingAgent())->prompt('Book a meeting with John tomorrow at 3pm');
-echo $response; // Uses BookAppointmentTool
 ```
 
-## Creating Custom Agents
+## Using ChatService (recommended)
 
-### Scaffold
+Instead of calling agents directly, use `ChatService` which handles RAG context injection, source citations, and multi-tenant scoping:
+
+```php
+use LarAIgent\AiKit\Services\Chat\ChatService;
+
+$chat = app(ChatService::class);
+
+// Simple
+$result = $chat->sendMessage('What is the return policy?');
+$result['reply'];   // AI response
+$result['sources']; // [{name, url, type}]
+
+// With custom agent and scope
+$result = $chat->sendMessage(
+    message: 'What products do you have?',
+    agent: new ProductAgent(),
+    scope: ['chatbot_id' => 42],
+    topK: 10,
+    threshold: 0.3,
+);
+```
+
+### ChatService Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `message` | string | required | User's message |
+| `agent` | Agent\|null | SupportAgent | Custom agent instance |
+| `history` | iterable | `[]` | Previous conversation turns |
+| `scope` | array | `[]` | Tenant scope for RAG filtering |
+| `topK` | int\|null | config value (5) | Number of RAG chunks to retrieve |
+| `threshold` | float\|null | config value (0.4) | Minimum similarity score |
+
+## Creating Custom Agents
 
 ```bash
 php artisan make:larai-agent ProductAgent
@@ -44,6 +78,8 @@ namespace App\Ai\Agents;
 use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Contracts\HasTools;
 use Laravel\Ai\Promptable;
+use Laravel\Ai\Tools\SimilaritySearch;
+use LarAIgent\AiKit\Models\Document;
 
 class ProductAgent implements Agent, HasTools
 {
@@ -51,50 +87,19 @@ class ProductAgent implements Agent, HasTools
 
     public function instructions(): string
     {
-        return 'You are a product expert for our e-commerce store.';
+        return 'You are a product expert. Answer questions using the knowledge base.';
     }
 
     public function tools(): iterable
     {
         return [
-            // Add tools here
+            SimilaritySearch::usingModel(Document::class, 'embedding'),
         ];
     }
 }
 ```
 
-### Adding RAG to your agent
-
-```php
-use LarAIgent\AiKit\Models\Document;
-use Laravel\Ai\Tools\SimilaritySearch;
-
-public function tools(): iterable
-{
-    return [
-        SimilaritySearch::usingModel(Document::class, 'embedding')
-            ->withDescription('Search the product knowledge base.'),
-    ];
-}
-```
-
-### Using the ChatService (recommended for RAG)
-
-Instead of calling agents directly, use `ChatService` which handles RAG context injection automatically:
-
-```php
-use LarAIgent\AiKit\Services\Chat\ChatService;
-
-$chat = app(ChatService::class);
-$result = $chat->sendMessage('What products do you have?');
-
-$result['reply'];   // AI response
-$result['sources']; // Sources used
-```
-
 ## Creating Custom Tools
-
-### Scaffold
 
 ```bash
 php artisan make:larai-tool CheckOrderTool
@@ -121,13 +126,8 @@ class CheckOrderTool implements Tool
 
     public function handle(Request $request): Stringable|string
     {
-        $order = Order::where('number', $request['order_number'])->first();
-
-        if (! $order) {
-            return 'Order not found.';
-        }
-
-        return "Order #{$order->number}: {$order->status}, placed on {$order->created_at->format('M j, Y')}";
+        $order = \App\Models\Order::where('number', $request['order_number'])->first();
+        return $order ? "Order #{$order->number}: {$order->status}" : 'Order not found.';
     }
 
     public function schema(JsonSchema $schema): array
@@ -136,17 +136,5 @@ class CheckOrderTool implements Tool
             'order_number' => $schema->string()->required(),
         ];
     }
-}
-```
-
-### Attach tools to agents
-
-```php
-public function tools(): iterable
-{
-    return [
-        new \App\Ai\Tools\CheckOrderTool(),
-        SimilaritySearch::usingModel(Document::class, 'embedding'),
-    ];
 }
 ```

@@ -2,6 +2,7 @@
 
 namespace LarAIgent\AiKit\Services\Chat;
 
+use Laravel\Ai\Contracts\Agent;
 use LarAIgent\AiKit\Agents\SupportAgent;
 use LarAIgent\AiKit\Services\FeatureDetector;
 use LarAIgent\AiKit\Services\Retrieval\RetrievalService;
@@ -16,23 +17,37 @@ class ChatService
     /**
      * Send a message through the chat pipeline with optional RAG context.
      *
+     * @param string $message          The user's message
+     * @param Agent|null $agent        Custom agent (defaults to SupportAgent)
+     * @param iterable $history        Previous conversation turns
+     * @param array $scope             Tenant scope for RAG filtering (e.g. ['chatbot_id' => 42])
+     * @param int|null $topK           Override RAG result count
+     * @param float|null $threshold    Override similarity threshold
      * @return array{reply: string, sources: array}
      */
-    public function sendMessage(string $message): array
-    {
+    public function sendMessage(
+        string $message,
+        ?Agent $agent = null,
+        iterable $history = [],
+        array $scope = [],
+        ?int $topK = null,
+        ?float $threshold = null,
+    ): array {
+        $agent = $agent ?? new SupportAgent();
         $sources = [];
         $contextBlock = '';
 
-        // If RAG is enabled, retrieve relevant chunks and build context
+        // If RAG is enabled, retrieve relevant chunks with scope
         if ($this->features->ragEnabled()) {
-            $results = $this->retrieval->retrieve($message);
+            $results = $this->retrieval->retrieve($message, $topK, $threshold, $scope);
 
             if ($results->isNotEmpty()) {
                 $contextParts = [];
                 foreach ($results as $i => $result) {
-                    $contextParts[] = "[Source " . ($i + 1) . ": {$result['source_name']}]\n{$result['content']}";
+                    $name = $result['source_name'] ?? 'Unknown';
+                    $contextParts[] = "[Source " . ($i + 1) . ": {$name}]\n{$result['content']}";
                     $sources[] = [
-                        'name' => $result['source_name'],
+                        'name' => $name,
                         'url' => $result['source_url'],
                         'type' => $result['source_type'],
                     ];
@@ -45,8 +60,7 @@ class ChatService
         }
 
         $prompt = $contextBlock . $message;
-
-        $response = (new SupportAgent())->prompt($prompt);
+        $response = $agent->prompt($prompt);
 
         return [
             'reply' => (string) $response,

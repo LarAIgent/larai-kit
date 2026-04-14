@@ -18,17 +18,45 @@ Check the health of all LarAI Kit services.
 php artisan larai:doctor
 ```
 
-Shows status of: database, AI provider, vector store, storage, cache, Redis, queue. Reports the current feature tier and configuration.
+Shows: database, AI provider, vector store, storage, cache, Redis, queue. Reports feature tier and configuration summary.
+
+### Deep mode
+
+Test live API calls (embedding + vector store connectivity):
+
+```bash
+php artisan larai:doctor --deep
+```
+
+This sends a real embedding request to your AI provider and validates the returned vector dimensions match your config. Catches misconfiguration in seconds.
+
+```
+LarAI Kit Health Check
+
+  [OK]      Database (mysql) (3.2ms)
+  [OK]      AI Provider (openai)
+  [OK]      Embedding probe (1536 dims, 2841ms)    <-- live API test
+  [OK]      Vector Store (Pinecone)
+  [OK]      Storage (public)
+  [OK]      Cache (file)
+  [SKIP]    Redis — not configured
+  [SKIP]    Queue (sync) — sync mode
+
+Configuration:
+  AI Provider:   openai
+  Vector Store:  pinecone
+  Database:      mysql
+  Feature Tier:  2
+  RAG:           enabled
+```
 
 ## larai:chat
 
-Interactive CLI chat session with the SupportAgent. Useful for testing your RAG pipeline without a web UI.
+Interactive CLI chat session with the SupportAgent. Type messages, get responses. Type `exit` to quit.
 
 ```bash
 php artisan larai:chat
 ```
-
-Type messages and get responses. Type `exit` to quit.
 
 ## make:larai-agent
 
@@ -38,7 +66,7 @@ Scaffold a new Agent class.
 php artisan make:larai-agent ProductAgent
 ```
 
-Creates `app/Ai/Agents/ProductAgent.php` implementing `Agent` and `HasTools`.
+Creates `app/Ai/Agents/ProductAgent.php`.
 
 ## make:larai-tool
 
@@ -48,4 +76,4 @@ Scaffold a new Tool class.
 php artisan make:larai-tool CheckOrderTool
 ```
 
-Creates `app/Ai/Tools/CheckOrderTool.php` implementing `Tool` with `description()`, `handle()`, and `schema()` methods.
+Creates `app/Ai/Tools/CheckOrderTool.php`.

@@ -11,6 +11,11 @@ class NullEmbedding implements EmbeddingProvider
         return array_fill(0, $this->dimensions(), 0.0);
     }
 
+    public function embedMany(array $texts): array
+    {
+        return array_map(fn () => $this->embed(''), $texts);
+    }
+
     public function dimensions(): int
     {
         return (int) config('larai-kit.embedding_dimensions', 1536);

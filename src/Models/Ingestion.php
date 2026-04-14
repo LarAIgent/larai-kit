@@ -4,6 +4,7 @@ namespace LarAIgent\AiKit\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use LarAIgent\AiKit\Events\IngestionStateChanged;
 
 class Ingestion extends Model
 {
@@ -42,9 +43,23 @@ class Ingestion extends Model
 
     public function markState(string $state, ?string $error = null): void
     {
+        // Guard: cannot mark "indexed" with zero chunks
+        if ($state === 'indexed' && ($this->chunk_count ?? 0) === 0) {
+            $state = 'failed';
+            $error = $error ?? 'Ingestion completed but no chunks were indexed.';
+        }
+
         $this->update([
             'state' => $state,
             'error' => $error,
         ]);
+
+        // Fire event for pipeline observability
+        IngestionStateChanged::dispatch(
+            $this->asset ?? $this->asset()->first(),
+            $this,
+            $state,
+            $error,
+        );
     }
 }

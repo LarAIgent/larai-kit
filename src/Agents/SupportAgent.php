@@ -14,7 +14,7 @@ class SupportAgent implements Agent, HasTools
 
     public function instructions(): string
     {
-        return 'You are a helpful support agent for LarAIgent. Use the knowledge base when relevant and be concise.';
+        return 'You are a helpful assistant. Answer questions accurately and concisely. When knowledge base context is provided, cite your sources by name.';
     }
 
     /**
@@ -24,7 +24,7 @@ class SupportAgent implements Agent, HasTools
     {
         return [
             SimilaritySearch::usingModel(Document::class, 'embedding')
-                ->withDescription('Search the LarAIgent knowledge base for relevant context.'),
+                ->withDescription('Search the knowledge base for relevant context.'),
         ];
     }
 }

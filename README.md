@@ -8,6 +8,12 @@
 
 Built on top of [Laravel's first-party AI SDK](https://laravel.com/blog/introducing-the-laravel-ai-sdk). Works with **MySQL or PostgreSQL**. Supports **Pinecone and pgvector** for vector search.
 
+> **Before you start — three things to know:**
+>
+> 1. The namespace is `LarAIgent\AiKit\...` (case-sensitive — matters on Linux)
+> 2. Run `php artisan queue:work` in a separate terminal, or set `QUEUE_CONNECTION=sync` in `.env` (otherwise ingestion jobs queue silently)
+> 3. OpenAI tier-1 keys allow ~3 RPM for embeddings — a 50KB document may rate-limit you. Set `LARAI_RETRY_MAX=5` or upgrade your OpenAI tier.
+
 ---
 
 ## Why LarAI Kit?
@@ -52,13 +58,16 @@ That's it. You now have a RAG-enabled AI agent in your Laravel app.
 | Feature | Description |
 |---|---|
 | **Agents + Tools** | Pre-built `SupportAgent` (RAG) and `BookingAgent` (tools) + scaffolding commands |
-| **Document Ingestion** | Upload text, PDF, DOCX -> auto parse -> chunk -> embed -> index |
-| **Vector Search** | Pinecone (default) or pgvector - swappable via `.env` |
-| **RAG Chat** | Automatically retrieves relevant context and injects it into agent prompts |
-| **Graceful Degradation** | App works at every tier - missing services disable features, never crash |
-| **Multi-Provider** | OpenAI, Anthropic, Gemini - switch via `.env` |
-| **Multi-Database** | MySQL (default) or PostgreSQL - migrations adapt automatically |
-| **Artisan Commands** | `larai:install`, `larai:doctor`, `larai:chat`, `make:larai-agent`, `make:larai-tool` |
+| **Document Ingestion** | Upload text, PDF, DOCX -> auto parse -> chunk -> batch embed -> batch upsert |
+| **Vector Search** | Pinecone (default) or pgvector — swappable via `.env`, with retry/backoff |
+| **RAG Chat** | Retrieves relevant context, injects into prompts, returns source citations |
+| **Multi-Tenant Scoping** | Scope ingestion and retrieval per tenant/chatbot — prevents data leaks |
+| **Graceful Degradation** | App works at every tier — missing services disable features, never crash |
+| **Multi-Provider** | OpenAI, Anthropic, Gemini — switch AI provider via `.env` |
+| **Multi-Database** | MySQL (default) or PostgreSQL — migrations adapt automatically |
+| **Batch Operations** | `embedMany()` and `upsertMany()` for 5-10x faster ingestion |
+| **Pipeline Events** | `IngestionStateChanged` fired on every transition for monitoring |
+| **Artisan Commands** | `larai:install`, `larai:doctor --deep`, `larai:chat`, `make:larai-agent`, `make:larai-tool` |
 
 ---
 

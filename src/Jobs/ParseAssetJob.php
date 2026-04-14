@@ -16,47 +16,45 @@ class ParseAssetJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    public int $timeout = 120;
+
     public function __construct(
         public readonly Asset $asset,
         public readonly Ingestion $ingestion,
+        public readonly array $scope = [],
     ) {}
 
     public function handle(ParserRegistry $registry): void
     {
+        set_time_limit(0);
         $this->ingestion->markState('parsing');
 
         try {
             $mime = $this->asset->mime ?? 'text/plain';
 
             if (! $registry->supports($mime)) {
-                $this->ingestion->markState('failed', "Unsupported mime type: {$mime}");
+                $supported = implode(', ', $registry->allSupportedMimeTypes());
+                $this->ingestion->markState('failed', "Unsupported mime type: {$mime}. Supported: {$supported}");
                 return;
             }
 
-            $parser = $registry->resolve($mime);
-
-            // Resolve file path from storage
             $disk = $this->asset->source_disk;
             $path = $this->asset->source_path;
 
-            if ($disk && $path) {
-                $fullPath = \Illuminate\Support\Facades\Storage::disk($disk)->path($path);
-            } else {
+            if (! $disk || ! $path) {
                 $this->ingestion->markState('failed', 'No file path available for parsing.');
                 return;
             }
 
-            $text = $parser->parse($fullPath);
+            $fullPath = \Illuminate\Support\Facades\Storage::disk($disk)->path($path);
+            $text = $registry->resolve($mime)->parse($fullPath);
 
             if (empty(trim($text))) {
                 $this->ingestion->markState('failed', 'Parser returned empty text.');
                 return;
             }
 
-            // Store parsed text on the Document record too
-            $this->asset->update(['parsed_text' => $text]);
-
-            ChunkAssetJob::dispatch($this->asset, $this->ingestion, $text);
+            ChunkAssetJob::dispatch($this->asset, $this->ingestion, $text, $this->scope);
 
         } catch (Throwable $e) {
             $this->ingestion->markState('failed', $e->getMessage());

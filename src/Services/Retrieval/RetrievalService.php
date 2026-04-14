@@ -17,9 +17,15 @@ class RetrievalService
 
     /**
      * Retrieve the most relevant chunks for a user query.
+     *
+     * @param array<string, mixed> $scope  Tenant scope filter (e.g. ['chatbot_id' => 42])
      */
-    public function retrieve(string $query, ?int $limit = null, ?float $threshold = null): Collection
-    {
+    public function retrieve(
+        string $query,
+        ?int $limit = null,
+        ?float $threshold = null,
+        array $scope = [],
+    ): Collection {
         if (! $this->features->ragEnabled()) {
             return collect();
         }
@@ -29,7 +35,7 @@ class RetrievalService
 
         $embedding = $this->embedder->embed($query);
 
-        return $this->vectorStore->search($embedding, $limit, $threshold)
+        return $this->vectorStore->search($embedding, $limit, $threshold, $scope)
             ->map(fn (array $result) => [
                 'content' => $result['content'] ?? $result['metadata']['content'] ?? '',
                 'source_name' => $result['metadata']['source_name'] ?? null,
