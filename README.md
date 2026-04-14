@@ -58,15 +58,19 @@ That's it. You now have a RAG-enabled AI agent in your Laravel app.
 | Feature | Description |
 |---|---|
 | **Agents + Tools** | Pre-built `SupportAgent` (RAG) and `BookingAgent` (tools) + scaffolding commands |
-| **Document Ingestion** | Upload text, PDF, DOCX -> auto parse -> chunk -> batch embed -> batch upsert |
+| **Document Ingestion** | Upload text, PDF, DOCX, or URL -> auto parse -> chunk -> batch embed -> batch upsert |
+| **URL Ingestion** | `ingestUrl()` with SSRF protection — fetches, parses HTML/text, chunks, embeds |
 | **Vector Search** | Pinecone (default) or pgvector — swappable via `.env`, with retry/backoff |
 | **RAG Chat** | Retrieves relevant context, injects into prompts, returns source citations |
-| **Multi-Tenant Scoping** | Scope ingestion and retrieval per tenant/chatbot — prevents data leaks |
+| **Streaming Chat** | `streamMessage()` returns SSE-ready response — token-by-token with sources at the end |
+| **Conversations** | Persistent chat threads with `Conversation` + `Message` models (UUID, scope-aware) |
+| **Multi-Tenant Scoping** | Scope ingestion, retrieval, and conversations per tenant — prevents data leaks |
+| **Usage Tracking** | `ChatCompleted` + `EmbeddingsCompleted` events, opt-in DB persistence via `ai_usage` |
 | **Graceful Degradation** | App works at every tier — missing services disable features, never crash |
 | **Multi-Provider** | OpenAI, Anthropic, Gemini — switch AI provider via `.env` |
 | **Multi-Database** | MySQL (default) or PostgreSQL — migrations adapt automatically |
 | **Batch Operations** | `embedMany()` and `upsertMany()` for 5-10x faster ingestion |
-| **Pipeline Events** | `IngestionStateChanged` fired on every transition for monitoring |
+| **Health Endpoint** | JSON web endpoint at `/_larai/health` + `larai:doctor --deep` CLI |
 | **Artisan Commands** | `larai:install`, `larai:doctor --deep`, `larai:chat`, `make:larai-agent`, `make:larai-tool` |
 
 ---
@@ -138,6 +142,37 @@ $result['reply'];   // AI response with cited sources
 $result['sources']; // [{name, url, type}, ...]
 ```
 
+### Conversations (persistent chat threads)
+
+```php
+use LarAIgent\AiKit\Services\Chat\ConversationManager;
+
+$conversations = app(ConversationManager::class);
+$chat = app(ChatService::class);
+
+// Create a conversation
+$convo = $conversations->create(scope: ['chatbot_id' => 42], title: 'Support thread');
+
+// Send messages — history auto-loaded and persisted
+$result = $chat->sendMessage('What is the return policy?', conversationId: $convo->id);
+$result = $chat->sendMessage('How long do I have?', conversationId: $convo->id);
+// Both messages + replies are stored in ai_messages
+```
+
+### Streaming chat (SSE)
+
+```php
+// In a controller — return directly for auto-SSE response
+public function stream(Request $request)
+{
+    $chat = app(ChatService::class);
+    return $chat->streamMessage($request->input('message'));
+    // Returns: data: {"type":"text_delta","delta":"..."} per chunk
+    //          data: {"type":"sources","sources":[...]}
+    //          data: {"type":"done"}
+}
+```
+
 ### Ingest documents
 
 ```php
@@ -150,6 +185,12 @@ $asset = $ingestion->ingestText('Our return policy allows returns within 30 days
 
 // Ingest a file (PDF, DOCX, TXT)
 $asset = $ingestion->ingestFile($request->file('document'));
+
+// Ingest a URL (with SSRF protection)
+$asset = $ingestion->ingestUrl('https://example.com/docs/faq');
+
+// With multi-tenant scope
+$asset = $ingestion->ingestUrl('https://example.com/docs', scope: ['chatbot_id' => 42]);
 ```
 
 ### Create a custom agent
@@ -187,19 +228,21 @@ php artisan make:larai-tool CheckOrderTool
 ### Check system health
 
 ```bash
-php artisan larai:doctor
+php artisan larai:doctor        # config checks
+php artisan larai:doctor --deep  # + live API probe (embedding test)
 ```
 
 ```
-LarAIgent Health Check
+LarAI Kit Health Check
 
-  [OK]      Database (mysql)
+  [OK]      Database (mysql, 3.2ms)
   [OK]      AI Provider (openai)
-  [OK]      Vector Store (Pinecone)
+  [OK]      Embedding probe (1536 dims, 2841ms)    <-- --deep only
+  [OK]      Vector Store (pinecone)
   [OK]      Storage (public)
   [OK]      Cache (file)
-  [SKIP]    Redis - not configured
-  [SKIP]    Queue (sync) - sync mode
+  [SKIP]    Redis — not configured
+  [SKIP]    Queue — sync mode
 
 Configuration:
   AI Provider:   openai
@@ -208,6 +251,28 @@ Configuration:
   Feature Tier:  2
   RAG:           enabled
 ```
+
+### Web health endpoint (JSON)
+
+Enable in `.env`:
+```env
+LARAI_HEALTH_ENABLED=true
+LARAI_HEALTH_PATH=_larai/health
+```
+
+```bash
+curl http://localhost/_larai/health?deep=true
+```
+
+Returns structured JSON with all check results — wire into monitoring dashboards.
+
+### Usage tracking
+
+```env
+LARAI_TRACK_USAGE=true   # Records to ai_usage table
+```
+
+Events (`ChatCompleted`, `EmbeddingsCompleted`) are always dispatched — listen to them for custom billing or analytics even without DB persistence.
 
 ### Interactive CLI chat
 
@@ -249,20 +314,23 @@ Your Laravel App
           +-- EmbeddingProvider (generates vectors)
           +-- VectorStore (stores/searches vectors)
           +-- FileStorage (stores uploaded files)
-          +-- IngestionService (parse -> chunk -> embed pipeline)
+          +-- IngestionService (file, text, URL -> chunk -> embed)
           +-- RetrievalService (semantic search)
-          +-- ChatService (RAG-augmented conversations)
+          +-- ChatService (RAG chat, streaming, conversations)
+          +-- ConversationManager (persistent threads)
+          +-- HealthCheck (system diagnostics)
+          +-- UrlFetcher (SSRF-protected HTTP fetch)
 ```
 
 ---
 
 ## Ingestion Pipeline
 
-When you ingest a document, this happens automatically:
+When you ingest a document (file, text, or URL), this happens automatically:
 
 ```
-Upload/Text --> Validate --> Store file --> Parse to text --> Chunk (with overlap)
-    --> Generate embeddings --> Upsert to vector store --> Done
+File/Text/URL --> Validate --> Store/Fetch --> Parse to text --> Chunk (with overlap)
+    --> Batch embed --> Batch upsert to vector store --> Done
 ```
 
 Each step is a queued job (or runs synchronously when `QUEUE_CONNECTION=sync`):
@@ -279,6 +347,7 @@ State tracked in `ai_ingestions` table: `queued -> parsing -> chunking -> embedd
 | Type | Extension | Parser |
 |---|---|---|
 | Plain text | .txt, .md, .csv | Built-in |
+| HTML | .html (or via URL) | Built-in (DOMDocument) |
 | PDF | .pdf | Requires `smalot/pdfparser` |
 | Word | .docx | Requires `phpoffice/phpword` |
 
@@ -305,10 +374,10 @@ composer require smalot/pdfparser phpoffice/phpword
 |---|---|
 | [Installation](docs/installation.md) | Step-by-step setup guide |
 | [Configuration](docs/configuration.md) | All `.env` options and config reference |
-| [Agents & Tools](docs/agents-and-tools.md) | Creating custom agents and tools |
-| [Ingestion Pipeline](docs/ingestion-pipeline.md) | Document upload, parsing, chunking, embedding |
-| [Vector Stores](docs/vector-stores.md) | Pinecone vs pgvector setup and switching |
-| [Artisan Commands](docs/artisan-commands.md) | All available CLI commands |
+| [Agents & Tools](docs/agents-and-tools.md) | Creating custom agents and tools, ChatService parameters |
+| [Ingestion Pipeline](docs/ingestion-pipeline.md) | File, text, and URL ingestion with pipeline events |
+| [Vector Stores](docs/vector-stores.md) | Pinecone vs pgvector, multi-tenant scoping, batch ops |
+| [Artisan Commands](docs/artisan-commands.md) | All CLI commands including `--deep` mode |
 | [Testing](docs/testing.md) | How to test with fakes |
 
 ---
