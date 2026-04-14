@@ -109,4 +109,42 @@ return [
         'on_status' => [429, 500, 502, 503, 504],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Usage Tracking
+    |--------------------------------------------------------------------------
+    | When enabled, ChatCompleted and EmbeddingsCompleted events are recorded
+    | to the ai_usage table automatically. Events are always dispatched
+    | regardless of this setting — this only controls persistence.
+    */
+
+    'track_usage' => (bool) env('LARAI_TRACK_USAGE', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | URL Ingestion
+    |--------------------------------------------------------------------------
+    */
+
+    'url_ingestion' => [
+        'timeout' => (int) env('LARAI_URL_TIMEOUT', 30),
+        'max_redirects' => (int) env('LARAI_URL_MAX_REDIRECTS', 5),
+        'max_size_mb' => (int) env('LARAI_URL_MAX_SIZE_MB', 10),
+        'user_agent' => env('LARAI_URL_USER_AGENT', 'LarAIgent/1.0'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Web Health Endpoint
+    |--------------------------------------------------------------------------
+    | Exposes a JSON health endpoint at the configured path.
+    | Disabled by default — enable in production for monitoring.
+    */
+
+    'health_endpoint' => [
+        'enabled' => (bool) env('LARAI_HEALTH_ENABLED', false),
+        'path' => env('LARAI_HEALTH_PATH', '_larai/health'),
+        'middleware' => ['auth'],
+    ],
+
 ];

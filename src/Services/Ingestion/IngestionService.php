@@ -18,6 +18,7 @@ class IngestionService
     public function __construct(
         protected FileStorage $storage,
         protected ParserRegistry $parserRegistry,
+        protected ?UrlFetcher $urlFetcher = null,
     ) {}
 
     /**
@@ -87,6 +88,85 @@ class IngestionService
 
         if (empty($chunks)) {
             $ingestion->markState('failed', 'Chunker produced no chunks.');
+            return $asset;
+        }
+
+        $ingestion->markState('chunking');
+
+        $chunkIds = [];
+        foreach ($chunks as $chunk) {
+            $model = Chunk::create([
+                'asset_id' => $asset->id,
+                'content' => $chunk['text'],
+                'chunk_index' => $chunk['chunk_index'],
+                'created_at' => now(),
+            ]);
+            $chunkIds[] = $model->id;
+        }
+
+        $ingestion->update(['chunk_count' => count($chunkIds)]);
+
+        EmbedChunksJob::dispatch($asset, $ingestion, $chunkIds, $scope);
+
+        return $asset;
+    }
+
+    /**
+     * Ingest content from a URL.
+     *
+     * @param array<string, mixed> $scope  Tenant scope
+     */
+    public function ingestUrl(string $url, array $scope = []): Asset
+    {
+        $fetcher = $this->urlFetcher ?? app(UrlFetcher::class);
+        $result = $fetcher->fetch($url);
+
+        $contentType = $result['content_type'];
+        $body = $result['body'];
+
+        // Route by content type to extract text
+        $text = match (true) {
+            in_array($contentType, ['text/html', 'application/xhtml+xml']) =>
+                (new Parsers\HtmlParser())->parse($body),
+            in_array($contentType, ['text/plain', 'text/markdown', 'text/csv']) =>
+                trim($body),
+            default => throw new RuntimeException(
+                "Unsupported content type from URL: {$contentType}. "
+                . "Supported: text/html, text/plain, text/markdown, text/csv."
+            ),
+        };
+
+        if (empty(trim($text))) {
+            throw new RuntimeException('URL returned empty content after parsing.');
+        }
+
+        // Extract a name from the URL
+        $parsed = parse_url($url);
+        $name = basename($parsed['path'] ?? '') ?: $parsed['host'] ?? $url;
+
+        $asset = Asset::create([
+            'source_name' => Str::limit($name, 191, ''),
+            'source_type' => 'url',
+            'source_url' => $url,
+            'mime' => $contentType,
+            'size_bytes' => strlen($body),
+            'checksum' => md5($body),
+            'scope' => ! empty($scope) ? $scope : null,
+        ]);
+
+        $ingestion = Ingestion::create([
+            'asset_id' => $asset->id,
+            'state' => 'queued',
+        ]);
+
+        // Same flow as ingestText — chunk then embed
+        $ingestion->markState('parsing');
+
+        $chunker = app(Chunker::class);
+        $chunks = $chunker->chunk($text);
+
+        if (empty($chunks)) {
+            $ingestion->markState('failed', 'Chunker produced no chunks from URL content.');
             return $asset;
         }
 

@@ -9,6 +9,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use LarAIgent\AiKit\Contracts\EmbeddingProvider;
 use LarAIgent\AiKit\Contracts\VectorStore;
+use LarAIgent\AiKit\Events\EmbeddingsCompleted;
 use LarAIgent\AiKit\Models\Asset;
 use LarAIgent\AiKit\Models\Chunk;
 use LarAIgent\AiKit\Models\Ingestion;
@@ -33,6 +34,7 @@ class EmbedChunksJob implements ShouldQueue
         set_time_limit(0); // Prevent PHP timeout for sync queue
 
         $this->ingestion->markState('embedding');
+        $startTime = microtime(true);
 
         try {
             $chunks = Chunk::whereIn('id', $this->chunkIds)->get();
@@ -96,6 +98,17 @@ class EmbedChunksJob implements ShouldQueue
 
             $this->ingestion->update(['chunk_count' => count($upsertItems)]);
             $this->ingestion->markState('indexed');
+
+            // Dispatch usage event
+            $durationMs = (int) round((microtime(true) - $startTime) * 1000);
+            EmbeddingsCompleted::dispatch(
+                provider: config('larai-kit.ai_provider', 'openai'),
+                model: config('larai-kit.models.embedding', 'text-embedding-3-small'),
+                tokenCount: 0, // Token count not easily available from batch
+                chunkCount: count($upsertItems),
+                durationMs: $durationMs,
+                scope: $this->scope,
+            );
 
         } catch (Throwable $e) {
             $this->ingestion->markState('failed', $e->getMessage());

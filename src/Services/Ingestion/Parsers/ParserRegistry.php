@@ -16,6 +16,7 @@ class ParserRegistry
             new TextParser(),
             new PdfParser(),
             new DocxParser(),
+            new HtmlParser(),
         ];
     }
 

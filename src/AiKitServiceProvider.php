@@ -2,6 +2,8 @@
 
 namespace LarAIgent\AiKit;
 
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use LarAIgent\AiKit\Console\ChatCommand;
 use LarAIgent\AiKit\Console\DoctorCommand;
@@ -11,16 +13,22 @@ use LarAIgent\AiKit\Console\MakeToolCommand;
 use LarAIgent\AiKit\Contracts\EmbeddingProvider;
 use LarAIgent\AiKit\Contracts\FileStorage;
 use LarAIgent\AiKit\Contracts\VectorStore;
+use LarAIgent\AiKit\Events\ChatCompleted;
+use LarAIgent\AiKit\Events\EmbeddingsCompleted;
+use LarAIgent\AiKit\Http\Controllers\HealthController;
+use LarAIgent\AiKit\Listeners\RecordUsage;
 use LarAIgent\AiKit\Services\Chat\ChatService;
+use LarAIgent\AiKit\Services\Chat\ConversationManager;
 use LarAIgent\AiKit\Services\Embedding\NullEmbedding;
 use LarAIgent\AiKit\Services\Embedding\OpenAiEmbedding;
 use LarAIgent\AiKit\Services\FeatureDetector;
+use LarAIgent\AiKit\Services\HealthCheck;
 use LarAIgent\AiKit\Services\Ingestion\Chunker;
 use LarAIgent\AiKit\Services\Ingestion\IngestionService;
 use LarAIgent\AiKit\Services\Ingestion\Parsers\ParserRegistry;
+use LarAIgent\AiKit\Services\Ingestion\UrlFetcher;
 use LarAIgent\AiKit\Services\Retrieval\RetrievalService;
 use LarAIgent\AiKit\Services\Storage\LocalStorage;
-use LarAIgent\AiKit\Services\Storage\NullStorage;
 use LarAIgent\AiKit\Services\Storage\S3Storage;
 use LarAIgent\AiKit\Services\VectorStore\NullVectorStore;
 use LarAIgent\AiKit\Services\VectorStore\PgVectorStore;
@@ -33,14 +41,16 @@ class AiKitServiceProvider extends ServiceProvider
         $this->mergeConfigFrom(__DIR__ . '/../config/larai-kit.php', 'larai-kit');
 
         $this->app->singleton(FeatureDetector::class);
+        $this->app->singleton(HealthCheck::class);
+        $this->app->singleton(ConversationManager::class);
+        $this->app->singleton(UrlFetcher::class);
 
         // Vector store — resolved by config
-        $this->app->singleton(VectorStore::class, function ($app) {
+        $this->app->singleton(VectorStore::class, function () {
             $driver = config('larai-kit.vector_store', 'pinecone');
 
             return match ($driver) {
                 'pinecone' => tap(new PineconeVectorStore(), function ($store) {
-                    // Fall back to null if not configured
                     if (! $store->isConfigured()) {
                         $this->app->instance(VectorStore::class, new NullVectorStore());
                     }
@@ -58,22 +68,14 @@ class AiKitServiceProvider extends ServiceProvider
         $this->app->singleton(FileStorage::class, function ($app) {
             $features = $app->make(FeatureDetector::class);
 
-            if ($features->s3Enabled()) {
-                return new S3Storage();
-            }
-
-            return new LocalStorage();
+            return $features->s3Enabled() ? new S3Storage() : new LocalStorage();
         });
 
         // Embedding provider
         $this->app->singleton(EmbeddingProvider::class, function ($app) {
             $features = $app->make(FeatureDetector::class);
 
-            if ($features->aiProviderReady()) {
-                return new OpenAiEmbedding();
-            }
-
-            return new NullEmbedding();
+            return $features->aiProviderReady() ? new OpenAiEmbedding() : new NullEmbedding();
         });
 
         $this->app->singleton(ParserRegistry::class);
@@ -83,6 +85,7 @@ class AiKitServiceProvider extends ServiceProvider
             return new IngestionService(
                 $app->make(FileStorage::class),
                 $app->make(ParserRegistry::class),
+                $app->make(UrlFetcher::class),
             );
         });
 
@@ -98,6 +101,7 @@ class AiKitServiceProvider extends ServiceProvider
             return new ChatService(
                 $app->make(RetrievalService::class),
                 $app->make(FeatureDetector::class),
+                $app->make(ConversationManager::class),
             );
         });
     }
@@ -118,6 +122,18 @@ class AiKitServiceProvider extends ServiceProvider
                 MakeToolCommand::class,
                 ChatCommand::class,
             ]);
+        }
+
+        // Usage tracking listeners
+        $listener = new RecordUsage();
+        Event::listen(ChatCompleted::class, [$listener, 'handleChat']);
+        Event::listen(EmbeddingsCompleted::class, [$listener, 'handleEmbeddings']);
+
+        // Web health endpoint
+        if (config('larai-kit.health_endpoint.enabled', false)) {
+            Route::middleware(config('larai-kit.health_endpoint.middleware', ['auth']))
+                ->get(config('larai-kit.health_endpoint.path', '_larai/health'), HealthController::class)
+                ->name('larai.health');
         }
     }
 }
