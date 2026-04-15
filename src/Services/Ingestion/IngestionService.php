@@ -53,7 +53,7 @@ class IngestionService
 
         ParseAssetJob::dispatch($asset, $ingestion, $scope);
 
-        return $asset;
+        return $asset->load('ingestion');
     }
 
     /**
@@ -88,7 +88,7 @@ class IngestionService
 
         if (empty($chunks)) {
             $ingestion->markState('failed', 'Chunker produced no chunks.');
-            return $asset;
+            return $asset->load('ingestion');
         }
 
         $ingestion->markState('chunking');
@@ -108,7 +108,7 @@ class IngestionService
 
         EmbedChunksJob::dispatch($asset, $ingestion, $chunkIds, $scope);
 
-        return $asset;
+        return $asset->load('ingestion');
     }
 
     /**
@@ -167,7 +167,7 @@ class IngestionService
 
         if (empty($chunks)) {
             $ingestion->markState('failed', 'Chunker produced no chunks from URL content.');
-            return $asset;
+            return $asset->load('ingestion');
         }
 
         $ingestion->markState('chunking');
@@ -187,7 +187,7 @@ class IngestionService
 
         EmbedChunksJob::dispatch($asset, $ingestion, $chunkIds, $scope);
 
-        return $asset;
+        return $asset->load('ingestion');
     }
 
     protected function validateFile(UploadedFile $file): void

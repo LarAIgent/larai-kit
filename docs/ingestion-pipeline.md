@@ -76,11 +76,22 @@ If the pipeline reaches the "indexed" state but `chunk_count` is 0, it automatic
 
 ## Check Ingestion Status
 
+The returned `$asset` always has a fresh `ingestion` relationship loaded — you can read the final state directly:
+
 ```php
-$asset = Asset::find($id);
-$state = $asset->ingestion->state;
-$error = $asset->ingestion->error;
-$chunks = $asset->ingestion->chunk_count;
+$asset = $ingestion->ingestText('Hello world');
+
+// Safe — relationship is pre-loaded with final state
+$asset->ingestion->state;       // 'indexed' or 'failed'
+$asset->ingestion->chunk_count; // number of chunks indexed
+$asset->ingestion->error;       // null or error message
+```
+
+For assets loaded from the database later:
+
+```php
+$asset = Asset::with('ingestion')->find($id);
+$asset->ingestion->state;
 ```
 
 ## Queue Processing

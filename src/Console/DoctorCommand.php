@@ -31,6 +31,7 @@ class DoctorCommand extends Command
                     $this->printFail($label, $info);
                     $hasError = true;
                 })(),
+                'warn' => $this->warn($label, $info),
                 'skip' => $this->skip($label, $info),
             };
         }
@@ -63,6 +64,12 @@ class DoctorCommand extends Command
     {
         $msg = $note ? " — {$note}" : '';
         $this->line("  <fg=red>[FAIL]</>    {$name}{$msg}");
+    }
+
+    private function warn(string $name, ?string $note = null): void
+    {
+        $msg = $note ? " — {$note}" : '';
+        $this->line("  <fg=yellow>[WARN]</>    {$name}{$msg}");
     }
 
     private function skip(string $name, ?string $note = null): void

@@ -30,6 +30,8 @@ class HealthCheck
             'cache' => $this->checkCache(),
             'redis' => $this->checkRedis(),
             'queue' => $this->checkQueue(),
+            'pdf_parser' => $this->checkParser('Smalot\PdfParser\Parser', 'smalot/pdfparser'),
+            'docx_parser' => $this->checkParser('PhpOffice\PhpWord\IOFactory', 'phpoffice/phpword'),
         ];
 
         if ($deep && $this->features->aiProviderReady()) {
@@ -153,5 +155,14 @@ class HealthCheck
         }
 
         return ['status' => 'ok', 'detail' => $driver];
+    }
+
+    private function checkParser(string $class, string $package): array
+    {
+        if (class_exists($class)) {
+            return ['status' => 'ok', 'detail' => $package];
+        }
+
+        return ['status' => 'warn', 'detail' => "install {$package} to enable"];
     }
 }

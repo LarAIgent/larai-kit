@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.1 - 2026-04-15
+
+### Fixed
+- **Stale ingestion state on returned Asset** — `ingestFile()`, `ingestText()`, and `ingestUrl()` now call `$asset->load('ingestion')` before returning, so callers always get the final pipeline state without needing `$asset->fresh()` (#2)
+- **Missing upgrade migration for `scope` column** — v0.2.0 modified the original assets migration in-place, breaking users upgrading from v0.1.x. Added `2026_04_14_000008_add_scope_to_ai_assets_table.php` with `hasColumn` guard (#2)
+- **No warning when optional parsers are missing** — `larai:doctor` and the health endpoint now show `[WARN] Pdf parser — install smalot/pdfparser to enable` and `[WARN] Docx parser — install phpoffice/phpword to enable` instead of letting users discover this via runtime crash (#2)
+
 ## v0.1.1 - 2026-04-14
 
 ### Fixed
