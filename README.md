@@ -382,6 +382,16 @@ composer require smalot/pdfparser phpoffice/phpword
 
 ---
 
+## Community Examples
+
+Real-world starter prompts built and tested by the community.
+Browse the [`examples/`](examples/) folder or jump straight to:
+
+- [SaaS Chatbot Platform](examples/prompts/01-saas-chatbot-platform/) —
+  Build a full multi-tenant chatbot SaaS (like Chatbase) with Laravel 13
+
+---
+
 ## Contributing
 
 Contributions are welcome! Please:
