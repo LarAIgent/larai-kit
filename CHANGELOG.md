@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.2 - 2026-04-18
+
+### Fixed
+- **Fatal boot error: `DoctorCommand::warn()` visibility conflict** — the `warn()` method introduced in v0.2.1 was declared `private`, but `Illuminate\Console\Command` defines a `public warn()`. PHP refuses to load the class, crashing the app on boot. Renamed to `printWarn()` (same pattern as the existing `printFail()`). Apps on v0.2.1 were unable to boot — upgrade to v0.2.2 immediately. (#4)
+- **Streaming emitted raw JSON instead of text** — `ChatStreamResponse::getIterator()` fell back to `(string) $event` for non-text stream events, which serialized `StreamEnd`, tool events, etc. as their JSON representation, breaking SSE consumers. Replaced with an `extractDelta()` helper that uses duck typing on a `delta` property — only TextDelta events emit text; metadata events are silently skipped. (#4)
+
 ## v0.2.1 - 2026-04-15
 
 ### Fixed

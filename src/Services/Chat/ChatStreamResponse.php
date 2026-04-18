@@ -23,17 +23,18 @@ class ChatStreamResponse implements \IteratorAggregate, Responsable
         $this->fullText = '';
 
         foreach ($this->stream as $event) {
-            // Laravel AI SDK yields StreamEvent objects with different types
-            if (is_object($event)) {
-                $text = method_exists($event, 'text') ? $event->text() : (string) $event;
-            } else {
-                $text = (string) $event;
+            // Laravel AI SDK yields different StreamEvent types (TextDelta,
+            // StreamEnd, tool use events, etc.). Only emit text for events
+            // that actually carry a text delta — everything else is metadata
+            // that must not be serialized into the output stream.
+            $text = $this->extractDelta($event);
+
+            if ($text === null || $text === '') {
+                continue;
             }
 
-            if ($text !== '') {
-                $this->fullText .= $text;
-                yield ['type' => 'text_delta', 'delta' => $text];
-            }
+            $this->fullText .= $text;
+            yield ['type' => 'text_delta', 'delta' => $text];
         }
 
         // Yield sources as final event
@@ -89,5 +90,45 @@ class ChatStreamResponse implements \IteratorAggregate, Responsable
     public function conversationId(): ?string
     {
         return $this->conversationId;
+    }
+
+    /**
+     * Extract text content from a Laravel AI SDK stream event.
+     *
+     * Only TextDelta events carry a text fragment; StreamEnd and tool events
+     * return null (they're metadata, not visible output). Uses duck typing
+     * on a `delta` property so we don't depend on the SDK's exact class names.
+     */
+    protected function extractDelta(mixed $event): ?string
+    {
+        // Plain strings: yield as-is
+        if (is_string($event)) {
+            return $event;
+        }
+
+        if (! is_object($event)) {
+            return null;
+        }
+
+        // TextDelta has a public ->delta string property
+        if (property_exists($event, 'delta')) {
+            $delta = $event->delta;
+            if (is_string($delta)) {
+                return $delta;
+            }
+            // Nested delta object (some SDK shapes)
+            if (is_object($delta) && property_exists($delta, 'text') && is_string($delta->text)) {
+                return $delta->text;
+            }
+        }
+
+        // Fallback: some SDK events expose text() / getText()
+        if (method_exists($event, 'text')) {
+            $value = $event->text();
+            return is_string($value) ? $value : null;
+        }
+
+        // Any other event type (StreamEnd, ToolUse, etc.) — skip, not text output
+        return null;
     }
 }

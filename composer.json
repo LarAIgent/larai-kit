@@ -3,7 +3,7 @@
     "description": "The missing AI toolkit for Laravel - agents, RAG, vector search, document ingestion with Pinecone and pgvector support.",
     "type": "library",
     "license": "MIT",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "keywords": ["laravel", "ai", "agent", "rag", "pinecone", "pgvector", "openai", "embeddings", "vector-search", "chatbot"],
     "homepage": "https://github.com/LarAIgent/larai-kit",
     "authors": [
