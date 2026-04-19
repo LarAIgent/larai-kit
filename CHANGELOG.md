@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+- **Terminal ingestion events** — new `AssetIndexed` and `AssetFailed` events fired after `Ingestion::markState()` reaches a terminal state. Unlike `IngestionStateChanged` they are dispatched via `dispatch()->afterResponse()` in a web request, so listeners run after the caller has committed its outer transaction and linked its domain rows to the asset. In CLI/queue-worker contexts they fire immediately (no response boundary to defer against). Eliminates the race condition where consumers had to fall back to matching assets by `source_name` because listeners ran before `ai_asset_id` was stored. `IngestionStateChanged` behavior is unchanged — fully backward compatible. (#5)
+
 ## v0.2.2 - 2026-04-18
 
 ### Fixed
