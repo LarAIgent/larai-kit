@@ -58,7 +58,19 @@ Each ingestion is tracked in the `ai_ingestions` table:
 | `indexed` | Complete — chunks are searchable |
 | `failed` | Error occurred (check `error` column) |
 
-An `IngestionStateChanged` event is fired on every state transition. Listen to it for monitoring:
+## Pipeline Events
+
+Three events let you hook into the pipeline. Pick the one that matches your use case:
+
+| Event | When it fires | Timing | Use it for |
+|---|---|---|---|
+| `IngestionStateChanged` | Every state transition | Immediate | Progress bars, live status |
+| `AssetIndexed` | State reaches `indexed` | Deferred (`afterResponse`) | Post-ingest business logic |
+| `AssetFailed` | State reaches `failed` | Deferred (`afterResponse`) | Alerts, retries |
+
+### `IngestionStateChanged` — all transitions, immediate
+
+Fires on every state change. Good for progress tracking and logging:
 
 ```php
 use LarAIgent\AiKit\Events\IngestionStateChanged;
@@ -69,6 +81,40 @@ Event::listen(IngestionStateChanged::class, function ($event) {
     ]);
 });
 ```
+
+### `AssetIndexed` / `AssetFailed` — terminal, deferred
+
+Fire only on the terminal states, and are dispatched via `afterResponse()` in
+a web request. That means listeners run **after** your controller returns and
+your outer DB transaction commits — you can safely look up the asset by the
+foreign key you just stored:
+
+```php
+use LarAIgent\AiKit\Events\AssetIndexed;
+use LarAIgent\AiKit\Events\AssetFailed;
+
+Event::listen(AssetIndexed::class, function ($event) {
+    // By the time this runs, the caller has committed.
+    // You can safely find your domain row by ai_asset_id.
+    KnowledgeBase::where('ai_asset_id', $event->asset->id)->update([
+        'status' => 'indexed',
+        'chunk_count' => $event->ingestion->chunk_count,
+        'indexed_at' => now(),
+    ]);
+});
+
+Event::listen(AssetFailed::class, function ($event) {
+    Mail::to(config('alerts.ingestion'))
+        ->send(new IngestionFailedMail($event->asset, $event->error));
+});
+```
+
+In CLI or queue-worker contexts (no HTTP response boundary), these fire
+immediately — still correct because the job has already completed.
+
+**Prefer the terminal events when you only care about "did it work."** They
+eliminate the race where a listener fires before the caller has linked the
+asset ID to its own rows.
 
 ## Safety: Zero-Chunk Guard
 

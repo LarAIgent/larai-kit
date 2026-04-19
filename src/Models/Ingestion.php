@@ -4,6 +4,9 @@ namespace LarAIgent\AiKit\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\App;
+use LarAIgent\AiKit\Events\AssetFailed;
+use LarAIgent\AiKit\Events\AssetIndexed;
 use LarAIgent\AiKit\Events\IngestionStateChanged;
 
 class Ingestion extends Model
@@ -54,12 +57,36 @@ class Ingestion extends Model
             'error' => $error,
         ]);
 
-        // Fire event for pipeline observability
-        IngestionStateChanged::dispatch(
-            $this->asset ?? $this->asset()->first(),
-            $this,
-            $state,
-            $error,
-        );
+        $asset = $this->asset ?? $this->asset()->first();
+
+        // Fire immediate lifecycle event for progress tracking
+        IngestionStateChanged::dispatch($asset, $this, $state, $error);
+
+        // Fire terminal events deferred — listeners run after the caller has
+        // committed its outer transaction and linked its domain rows to the
+        // asset. In CLI/queue contexts this degrades to immediate dispatch.
+        if ($state === 'indexed') {
+            $this->dispatchTerminal(fn () => AssetIndexed::dispatch($asset, $this));
+        } elseif ($state === 'failed') {
+            $this->dispatchTerminal(
+                fn () => AssetFailed::dispatch($asset, $this, $error ?? 'unknown error'),
+            );
+        }
+    }
+
+    /**
+     * Dispatch a terminal event after the response is sent when running in a
+     * web request. Outside of HTTP (CLI, queue worker, tests), dispatch
+     * immediately since there is no response boundary to wait for.
+     */
+    protected function dispatchTerminal(callable $dispatcher): void
+    {
+        if (App::runningInConsole()) {
+            $dispatcher();
+
+            return;
+        }
+
+        dispatch($dispatcher)->afterResponse();
     }
 }
