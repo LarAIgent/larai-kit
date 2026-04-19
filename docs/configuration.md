@@ -82,6 +82,38 @@ LARAI_RETRY_DELAY_MS=1000    # Base delay in ms (doubles each attempt with jitte
 LARAI_HISTORY_TURNS=10
 ```
 
+## Health Endpoint
+
+Exposes a JSON health check at the configured path. Disabled by default —
+enable in production for uptime monitoring and alerting.
+
+```env
+LARAI_HEALTH_ENABLED=true
+LARAI_HEALTH_PATH=_larai/health
+LARAI_HEALTH_MIDDLEWARE=auth              # pipe-separated; empty = public
+```
+
+| Variable | Default | Notes |
+|---|---|---|
+| `LARAI_HEALTH_ENABLED` | `false` | Route is not registered until this is true |
+| `LARAI_HEALTH_PATH` | `_larai/health` | No leading slash |
+| `LARAI_HEALTH_MIDDLEWARE` | `auth` | Pipe-separated middleware stack |
+
+### Middleware stack syntax
+
+Use `|` to separate middleware, not `,` — commas are reserved for middleware
+parameters (e.g. Laravel's rate-limit syntax `throttle:60,1` = 60 requests
+per minute).
+
+```env
+LARAI_HEALTH_MIDDLEWARE=auth|throttle:60,1   # authenticated + rate-limited
+LARAI_HEALTH_MIDDLEWARE=throttle:10,1         # public but rate-limited
+LARAI_HEALTH_MIDDLEWARE=                      # fully public (use behind ingress allowlist)
+```
+
+Hit the endpoint with `?deep=true` to run live API probes (embedding +
+vector store) instead of just config validation.
+
 ## Full `.env` Example
 
 ```env
