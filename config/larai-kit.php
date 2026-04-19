@@ -144,9 +144,11 @@ return [
     'health_endpoint' => [
         'enabled' => (bool) env('LARAI_HEALTH_ENABLED', false),
         'path' => env('LARAI_HEALTH_PATH', '_larai/health'),
+        // Pipe-separated so values like `throttle:60,1` (Laravel's rate-limit
+        // syntax) survive — commas are reserved for middleware parameters.
         'middleware' => array_values(array_filter(array_map(
             'trim',
-            explode(',', (string) env('LARAI_HEALTH_MIDDLEWARE', 'auth'))
+            explode('|', (string) env('LARAI_HEALTH_MIDDLEWARE', 'auth'))
         ))),
     ],
 

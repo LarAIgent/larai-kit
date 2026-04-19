@@ -258,7 +258,7 @@ Enable in `.env`:
 ```env
 LARAI_HEALTH_ENABLED=true
 LARAI_HEALTH_PATH=_larai/health
-LARAI_HEALTH_MIDDLEWARE=auth       # comma-separated; leave empty for public
+LARAI_HEALTH_MIDDLEWARE=auth       # pipe-separated; leave empty for public
 ```
 
 ```bash
@@ -268,7 +268,8 @@ curl http://localhost/_larai/health?deep=true
 Returns structured JSON with all check results — wire into monitoring dashboards.
 Set `LARAI_HEALTH_MIDDLEWARE=` (empty) to expose publicly behind an ingress
 allowlist, or `LARAI_HEALTH_MIDDLEWARE=throttle:10,1` to rate-limit without
-auth.
+auth. Use `|` to stack (e.g. `auth|throttle:60,1`) — commas inside a single
+middleware parameter (Laravel rate-limit syntax) are preserved.
 
 ### Usage tracking
 
