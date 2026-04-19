@@ -49,9 +49,12 @@ class ChatStreamResponse implements \IteratorAggregate, Responsable
         // Done event
         yield ['type' => 'done'];
 
-        // Fire completion callback (persist conversation, dispatch events)
+        // Fire completion callback with the accumulated text and any usage
+        // object the underlying stream exposed. StreamableAgentResponse sets
+        // its ->usage property after iteration finishes, so we read it here.
         if ($this->onComplete) {
-            ($this->onComplete)($this->fullText);
+            $usage = is_object($this->stream) ? ($this->stream->usage ?? null) : null;
+            ($this->onComplete)($this->fullText, $usage);
         }
     }
 

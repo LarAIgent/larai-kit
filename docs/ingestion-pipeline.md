@@ -156,7 +156,15 @@ php artisan queue:work
 
 ## Batch Embedding
 
-Chunks are embedded in batches using `EmbeddingProvider::embedMany()` instead of one-by-one. This reduces API calls by 5-10x and avoids rate-limit issues on OpenAI tier-1 keys.
+Chunks are embedded in batches using `EmbeddingProvider::embedMany()` instead of one-by-one. The bundled `OpenAiEmbedding` driver calls `Embeddings::for($texts)->generate()` directly with a batch size of 96, cutting embedding API calls by ~100x on large documents and avoiding rate-limit issues on OpenAI tier-1 keys.
+
+### Token counts on `EmbeddingsCompleted`
+
+Providers that implement the optional `embedManyWithUsage(): EmbeddingResult`
+method — `OpenAiEmbedding` does — report the provider's `usage.total_tokens`
+on the `EmbeddingsCompleted` event. Third-party providers that only implement
+the original `embedMany()` contract continue to work; `tokenCount` is reported
+as `0` for those. No contract changes, fully backward compatible.
 
 ## Supported File Types
 

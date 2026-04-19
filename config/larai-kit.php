@@ -144,7 +144,10 @@ return [
     'health_endpoint' => [
         'enabled' => (bool) env('LARAI_HEALTH_ENABLED', false),
         'path' => env('LARAI_HEALTH_PATH', '_larai/health'),
-        'middleware' => ['auth'],
+        'middleware' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('LARAI_HEALTH_MIDDLEWARE', 'auth'))
+        ))),
     ],
 
 ];

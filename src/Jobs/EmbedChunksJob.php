@@ -44,9 +44,19 @@ class EmbedChunksJob implements ShouldQueue
                 return;
             }
 
-            // Batch embed all texts at once
+            // Batch embed all texts at once. Prefer the usage-aware variant
+            // when the provider exposes it so we can emit real token counts;
+            // fall back to `embedMany()` for third-party implementations.
             $texts = $chunks->pluck('content')->all();
-            $embeddings = $embedder->embedMany($texts);
+            $tokenCount = 0;
+
+            if (method_exists($embedder, 'embedManyWithUsage')) {
+                $result = $embedder->embedManyWithUsage($texts);
+                $embeddings = $result->vectors;
+                $tokenCount = (int) ($result->tokens ?? 0);
+            } else {
+                $embeddings = $embedder->embedMany($texts);
+            }
 
             // Prepare batch upsert items
             $upsertItems = [];
@@ -99,12 +109,11 @@ class EmbedChunksJob implements ShouldQueue
             $this->ingestion->update(['chunk_count' => count($upsertItems)]);
             $this->ingestion->markState('indexed');
 
-            // Dispatch usage event
             $durationMs = (int) round((microtime(true) - $startTime) * 1000);
             EmbeddingsCompleted::dispatch(
                 provider: config('larai-kit.ai_provider', 'openai'),
                 model: config('larai-kit.models.embedding', 'text-embedding-3-small'),
-                tokenCount: 0, // Token count not easily available from batch
+                tokenCount: $tokenCount,
                 chunkCount: count($upsertItems),
                 durationMs: $durationMs,
                 scope: $this->scope,

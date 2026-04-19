@@ -47,6 +47,7 @@ class ChatService
         $reply = (string) $response;
 
         $durationMs = (int) round((microtime(true) - $startTime) * 1000);
+        [$inputTokens, $outputTokens] = $this->extractUsage($response);
 
         // Persist to conversation if ID provided
         if ($conversationId && $this->conversations) {
@@ -54,12 +55,11 @@ class ChatService
             $this->conversations->appendAssistantMessage($conversationId, $reply, $rag['sources']);
         }
 
-        // Dispatch usage event
         ChatCompleted::dispatch(
             provider: $this->features->aiProvider(),
             model: config('larai-kit.models.chat', 'gpt-4o-mini'),
-            inputTokens: 0, // SDK AgentResponse may carry usage — extract if available
-            outputTokens: 0,
+            inputTokens: $inputTokens,
+            outputTokens: $outputTokens,
             durationMs: $durationMs,
             scope: $scope,
             conversationId: $conversationId,
@@ -87,6 +87,7 @@ class ChatService
         ?string $conversationId = null,
     ): ChatStreamResponse {
         $agent = $agent ?? new SupportAgent();
+        $startTime = microtime(true);
 
         $rag = $this->buildRagContext($message, $scope, $topK, $threshold);
         $dbHistory = $this->loadConversationHistory($conversationId);
@@ -98,20 +99,21 @@ class ChatService
             stream: $stream,
             sources: $rag['sources'],
             conversationId: $conversationId,
-            onComplete: function (string $fullText) use ($conversationId, $message, $rag, $scope) {
-                // Persist conversation
+            onComplete: function (string $fullText, mixed $usage) use ($conversationId, $message, $rag, $scope, $startTime) {
                 if ($conversationId && $this->conversations) {
                     $this->conversations->appendUserMessage($conversationId, $message);
                     $this->conversations->appendAssistantMessage($conversationId, $fullText, $rag['sources']);
                 }
 
-                // Dispatch usage event
+                [$inputTokens, $outputTokens] = $this->extractUsageFromObject($usage);
+                $durationMs = (int) round((microtime(true) - $startTime) * 1000);
+
                 ChatCompleted::dispatch(
                     provider: $this->features->aiProvider(),
                     model: config('larai-kit.models.chat', 'gpt-4o-mini'),
-                    inputTokens: 0,
-                    outputTokens: 0,
-                    durationMs: 0,
+                    inputTokens: $inputTokens,
+                    outputTokens: $outputTokens,
+                    durationMs: $durationMs,
                     scope: $scope,
                     conversationId: $conversationId,
                 );
@@ -169,5 +171,40 @@ class ChatService
             'role' => $msg->role,
             'content' => $msg->content,
         ])->all();
+    }
+
+    /**
+     * Extract [$promptTokens, $completionTokens] from an AgentResponse-like
+     * object. Uses duck typing so test doubles and future SDK shape changes
+     * don't break this path — we only care about the public `usage` property
+     * and its `promptTokens` / `completionTokens` integers.
+     *
+     * @return array{0: int, 1: int}
+     */
+    private function extractUsage(mixed $response): array
+    {
+        if (! is_object($response)) {
+            return [0, 0];
+        }
+
+        $usage = $response->usage ?? null;
+        return $this->extractUsageFromObject($usage);
+    }
+
+    /**
+     * Extract [$promptTokens, $completionTokens] from a `Usage` data object.
+     *
+     * @return array{0: int, 1: int}
+     */
+    private function extractUsageFromObject(mixed $usage): array
+    {
+        if (! is_object($usage)) {
+            return [0, 0];
+        }
+
+        return [
+            (int) ($usage->promptTokens ?? 0),
+            (int) ($usage->completionTokens ?? 0),
+        ];
     }
 }

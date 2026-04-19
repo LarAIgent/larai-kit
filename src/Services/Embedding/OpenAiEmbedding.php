@@ -3,6 +3,8 @@
 namespace LarAIgent\AiKit\Services\Embedding;
 
 use Illuminate\Support\Str;
+use Laravel\Ai\Embeddings;
+use Laravel\Ai\Responses\EmbeddingsResponse;
 use LarAIgent\AiKit\Contracts\EmbeddingProvider;
 
 class OpenAiEmbedding implements EmbeddingProvider
@@ -25,21 +27,40 @@ class OpenAiEmbedding implements EmbeddingProvider
 
     public function embedMany(array $texts): array
     {
+        return $this->embedManyWithUsage($texts)->vectors;
+    }
+
+    /**
+     * Batch-embed inputs and return vectors plus provider-reported token count.
+     *
+     * Uses `Embeddings::for($texts)->generate()` directly so we receive the
+     * full `EmbeddingsResponse` including `$tokens`, instead of the
+     * `Str::toEmbeddings()` macro which discards it.
+     */
+    public function embedManyWithUsage(array $texts): EmbeddingResult
+    {
         if (empty($texts)) {
-            return [];
+            return new EmbeddingResult(vectors: [], tokens: 0);
         }
 
-        // Batch in groups of 32 (OpenAI supports up to 2048 per call)
-        $batchSize = 32;
+        // OpenAI accepts up to 2048 inputs per call; keep batches modest so
+        // we don't blow through per-request token limits for large corpora.
+        $batchSize = 96;
         $allVectors = [];
+        $totalTokens = 0;
 
         foreach (array_chunk($texts, $batchSize) as $batch) {
-            foreach ($batch as $text) {
-                $allVectors[] = $this->embed($text);
+            /** @var EmbeddingsResponse $response */
+            $response = Embeddings::for(array_values($batch))->generate();
+
+            foreach ($response->embeddings as $vector) {
+                $allVectors[] = array_values($vector);
             }
+
+            $totalTokens += (int) ($response->tokens ?? 0);
         }
 
-        return $allVectors;
+        return new EmbeddingResult(vectors: $allVectors, tokens: $totalTokens);
     }
 
     public function dimensions(): int

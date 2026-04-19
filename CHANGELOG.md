@@ -2,10 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.2.3 - 2026-04-19
 
 ### Added
 - **Terminal ingestion events** — new `AssetIndexed` and `AssetFailed` events fired after `Ingestion::markState()` reaches a terminal state. Unlike `IngestionStateChanged` they are dispatched via `dispatch()->afterResponse()` in a web request, so listeners run after the caller has committed its outer transaction and linked its domain rows to the asset. In CLI/queue-worker contexts they fire immediately (no response boundary to defer against). Eliminates the race condition where consumers had to fall back to matching assets by `source_name` because listeners ran before `ai_asset_id` was stored. `IngestionStateChanged` behavior is unchanged — fully backward compatible. (#5)
+- **Real token counts on `ChatCompleted`** — `inputTokens` and `outputTokens` are now populated from the SDK's `AgentResponse::$usage` (non-streaming) and `StreamableAgentResponse::$usage` (streaming, available after the stream fully drains). Extraction uses duck typing against `usage->promptTokens` / `usage->completionTokens`, so test doubles and future SDK shape changes don't break the pipeline. `durationMs` is now also populated on the streaming path. (#6)
+- **`EmbeddingProvider::embedManyWithUsage()`** — new optional method on the `OpenAiEmbedding` implementation that returns an `EmbeddingResult` (vectors + provider-reported token count). `EmbedChunksJob` detects it via `method_exists()` and emits real `tokenCount` on `EmbeddingsCompleted` when available; third-party providers that implement only the original contract continue to work unchanged (tokens reported as 0). The contract itself is untouched — fully backward compatible. (#6)
+- **Env-configurable health endpoint middleware** — `LARAI_HEALTH_MIDDLEWARE` env var accepts a comma-separated list of middleware aliases (e.g. `auth,throttle:10,1`). Defaults to `auth` to preserve existing behavior. Set to empty to expose the endpoint publicly (for use behind a private network or ingress allowlist). Previously the middleware stack was hardcoded to `['auth']`, blocking monitoring systems that authenticate via API key or IP allowlist. (#7)
+- **PHPUnit test infrastructure** — added `phpunit/phpunit` and `orchestra/testbench` as dev dependencies, `phpunit.xml.dist`, and `tests/TestCase.php` base. First unit tests cover the new `EmbeddingResult` DTO and the `ChatStreamResponse` usage-passing contract. Run with `composer test`.
+
+### Fixed
+- **`OpenAiEmbedding::embedMany()` was not actually batching** — despite the method name, the implementation looped `$this->embed($text)` per chunk, issuing one HTTP request per input. It now delegates to `embedManyWithUsage()` which uses `Embeddings::for($texts)->generate()` with a batch size of 96. For a 200-chunk document this drops embedding API calls from 200 to 3. (#6)
 
 ## v0.2.2 - 2026-04-18
 
