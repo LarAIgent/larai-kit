@@ -93,4 +93,40 @@ class ChatStreamResponseTest extends TestCase
 
         $this->assertNull($captured);
     }
+
+    public function test_with_on_complete_chains_callbacks_and_passes_sources(): void
+    {
+        $textEvent = new class {
+            public string $delta = 'hello';
+        };
+        $finalUsage = (object) ['promptTokens' => 3, 'completionTokens' => 5];
+        $stream = new FakeStream([$textEvent], $finalUsage);
+
+        $order = [];
+        $internalPayload = [];
+        $externalPayload = [];
+
+        $response = new ChatStreamResponse(
+            stream: $stream,
+            sources: [['name' => 'Doc A']],
+            conversationId: 'abc',
+            onComplete: function (string $fullText, mixed $usage) use (&$order, &$internalPayload) {
+                $order[] = 'internal';
+                $internalPayload = [$fullText, $usage];
+            },
+        );
+
+        $response->withOnComplete(function (string $fullText, mixed $usage, array $sources) use (&$order, &$externalPayload) {
+            $order[] = 'external';
+            $externalPayload = [$fullText, $usage, $sources];
+        });
+
+        iterator_to_array($response->getIterator(), preserve_keys: false);
+
+        $this->assertSame(['internal', 'external'], $order);
+        $this->assertSame('hello', $internalPayload[0]);
+        $this->assertSame('hello', $externalPayload[0]);
+        $this->assertSame(3, $externalPayload[1]->promptTokens);
+        $this->assertSame([['name' => 'Doc A']], $externalPayload[2]);
+    }
 }

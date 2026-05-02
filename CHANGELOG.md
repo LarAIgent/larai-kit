@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.4 - 2026-05-02
+
+### Added
+- **`IngestionService::ingestFromDisk()`** - new API to ingest files that already exist on any configured Laravel disk (`disk + path + scope`) without requiring an `UploadedFile`. Reuses parser validation and the queued file pipeline. (#11)
+- **`ChatStreamResponse::withOnComplete(callable $cb): static`** - lets callers chain post-stream persistence logic without rebuilding SSE loops. Callback receives `(fullText, usage, sources)`. Existing internal callback behavior is preserved and executed first. (#10)
+- **Queued text/url ingestion entry jobs** - added `ProcessTextAssetJob` and `FetchUrlAssetJob` so `ingestText()` and `ingestUrl()` now use queued pipelines consistent with `ingestFile()`. (#13)
+- **Redundancy audit report** - added `docs/redundancy-audit-v0.2.4.md` for non-blocking cleanup/debt discovered during this release cycle.
+
+### Fixed
+- **Asset deletion now cleans vector store entries** - deleting an `Asset` captures related chunk IDs and dispatches `DeleteAssetVectorsJob` after commit to prevent orphaned vectors. (#9)
+- **pgvector cleanup hardening** - `PgVectorStore::delete()` now removes vectors by both direct document ID fallback and `source_meta.chunk_id` mapping, preventing stale vectors when IDs do not align one-to-one. (#9 overlap)
+- **Terminal ingestion events timing in CLI/web/workers** - `AssetIndexed` and `AssetFailed` are now deferred at the DB transaction boundary (after commit) instead of response-bound behavior. Removes race conditions where listeners executed before caller-linked `ai_asset_id` writes were visible. (#12)
+
 ## v0.2.3 - 2026-04-19
 
 ### Added

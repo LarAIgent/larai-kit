@@ -62,6 +62,27 @@ $result = $chat->sendMessage(
 | `topK` | int\|null | config value (5) | Number of RAG chunks to retrieve |
 | `threshold` | float\|null | config value (0.4) | Minimum similarity score |
 
+### Streaming with Post-Completion Persistence
+
+`ChatService::streamMessage()` returns `ChatStreamResponse`, which now supports chaining callbacks with `withOnComplete()`:
+
+```php
+use LarAIgent\AiKit\Services\Chat\ChatService;
+
+$chat = app(ChatService::class);
+
+return $chat->streamMessage('Summarize latest policy updates', conversationId: $conversation->id)
+    ->withOnComplete(function (string $fullText, mixed $usage, array $sources) use ($conversation) {
+        $conversation->messages()->create([
+            'role' => 'assistant',
+            'content' => $fullText,
+            'sources' => $sources ?: null,
+        ]);
+    });
+```
+
+Callback order is deterministic: package callback first, caller callback second.
+
 ## Creating Custom Agents
 
 ```bash

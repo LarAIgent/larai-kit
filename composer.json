@@ -3,7 +3,7 @@
     "description": "Laravel RAG and AI agent toolkit — drop-in document ingestion, vector search, streaming chat, and multi-tenant scoping for Laravel 12/13. Works with OpenAI, Anthropic, Gemini, Pinecone, and pgvector.",
     "type": "library",
     "license": "MIT",
-    "version": "0.2.3",
+    "version": "0.2.4",
     "keywords": [
         "laravel",
         "laravel-package",

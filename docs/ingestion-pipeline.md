@@ -1,148 +1,82 @@
 # Ingestion Pipeline
 
-The ingestion pipeline takes raw files or text and turns them into searchable vector embeddings.
+The ingestion pipeline converts files, text, and URLs into searchable vectors.
 
-## How It Works
-
-```
-Input (file or text)
-  --> Validate (type, size)
-  --> Store file (local disk or S3)
-  --> Parse to plain text (TextParser, PdfParser, DocxParser)
-  --> Chunk with overlap (configurable size)
-  --> Batch embed all chunks (OpenAI embedMany)
-  --> Batch upsert to vector store (Pinecone or pgvector)
-  --> Done (state: "indexed")
-```
-
-## Ingest Text
+## Entry Points
 
 ```php
 use LarAIgent\AiKit\Services\Ingestion\IngestionService;
 
 $ingestion = app(IngestionService::class);
-$asset = $ingestion->ingestText('Your company policies and FAQ content here...');
-```
 
-### With multi-tenant scope
-
-```php
-$asset = $ingestion->ingestText(
-    'Support docs for Acme Corp...',
-    name: 'Acme FAQ',
-    scope: ['chatbot_id' => 42],
-);
-```
-
-The scope is stored on the asset and passed through the pipeline into vector metadata. When retrieving, use the same scope to isolate results per tenant.
-
-## Ingest a File
-
-```php
-$asset = $ingestion->ingestFile($request->file('document'));
-
-// With scope
+// Upload from request
 $asset = $ingestion->ingestFile($request->file('document'), scope: ['chatbot_id' => 42]);
+
+// Re-ingest file already stored on a Laravel disk
+$asset = $ingestion->ingestFromDisk('public', 'knowledge/report.pdf', scope: ['chatbot_id' => 42]);
+
+// Raw text
+$asset = $ingestion->ingestText('Company policy text...', name: 'Policy', scope: ['chatbot_id' => 42]);
+
+// URL (safety checks run immediately; fetch/parse/chunk runs in jobs)
+$asset = $ingestion->ingestUrl('https://example.com/docs/faq', scope: ['chatbot_id' => 42]);
 ```
 
-## Pipeline States
+## Processing Flow
 
-Each ingestion is tracked in the `ai_ingestions` table:
+All entry points now use queued jobs for heavy work:
 
-| State | Description |
+```text
+queued -> parsing -> chunking -> embedding -> indexed
+                                 \-> failed
+```
+
+Jobs involved:
+
+- `ParseAssetJob` for uploaded/disk files
+- `ProcessTextAssetJob` for raw text ingestion
+- `FetchUrlAssetJob` for URL fetch + content extraction
+- `ChunkAssetJob` for chunk creation
+- `EmbedChunksJob` for embedding + vector upsert
+
+## States
+
+| State | Meaning |
 |---|---|
-| `queued` | Job dispatched, waiting to process |
-| `parsing` | Extracting text from file |
-| `chunking` | Splitting text into overlapping chunks |
-| `embedding` | Generating vector embeddings (batch) |
-| `indexed` | Complete — chunks are searchable |
-| `failed` | Error occurred (check `error` column) |
+| `queued` | Accepted and waiting for queued processing |
+| `parsing` | Parsing/extraction stage (including URL fetch) |
+| `chunking` | Chunk creation in progress |
+| `embedding` | Embeddings + vector upsert in progress |
+| `indexed` | Successfully indexed and searchable |
+| `failed` | Terminal failure (`error` column contains details) |
 
-## Pipeline Events
+## Events
 
-Three events let you hook into the pipeline. Pick the one that matches your use case:
+| Event | Fires When | Timing |
+|---|---|---|
+| `IngestionStateChanged` | Every state transition | Immediate |
+| `AssetIndexed` | Terminal success | After commit when inside transaction |
+| `AssetFailed` | Terminal failure | After commit when inside transaction |
 
-| Event | When it fires | Timing | Use it for |
-|---|---|---|---|
-| `IngestionStateChanged` | Every state transition | Immediate | Progress bars, live status |
-| `AssetIndexed` | State reaches `indexed` | Deferred (`afterResponse`) | Post-ingest business logic |
-| `AssetFailed` | State reaches `failed` | Deferred (`afterResponse`) | Alerts, retries |
-
-### `IngestionStateChanged` — all transitions, immediate
-
-Fires on every state change. Good for progress tracking and logging:
+Use terminal events for business workflows that depend on committed domain writes:
 
 ```php
-use LarAIgent\AiKit\Events\IngestionStateChanged;
-
-Event::listen(IngestionStateChanged::class, function ($event) {
-    Log::info("Asset {$event->asset->id}: {$event->state}", [
-        'error' => $event->error,
-    ]);
-});
-```
-
-### `AssetIndexed` / `AssetFailed` — terminal, deferred
-
-Fire only on the terminal states, and are dispatched via `afterResponse()` in
-a web request. That means listeners run **after** your controller returns and
-your outer DB transaction commits — you can safely look up the asset by the
-foreign key you just stored:
-
-```php
+use Illuminate\Support\Facades\Event;
 use LarAIgent\AiKit\Events\AssetIndexed;
-use LarAIgent\AiKit\Events\AssetFailed;
 
 Event::listen(AssetIndexed::class, function ($event) {
-    // By the time this runs, the caller has committed.
-    // You can safely find your domain row by ai_asset_id.
     KnowledgeBase::where('ai_asset_id', $event->asset->id)->update([
         'status' => 'indexed',
         'chunk_count' => $event->ingestion->chunk_count,
         'indexed_at' => now(),
     ]);
 });
-
-Event::listen(AssetFailed::class, function ($event) {
-    Mail::to(config('alerts.ingestion'))
-        ->send(new IngestionFailedMail($event->asset, $event->error));
-});
 ```
 
-In CLI or queue-worker contexts (no HTTP response boundary), these fire
-immediately — still correct because the job has already completed.
+## Queue Notes
 
-**Prefer the terminal events when you only care about "did it work."** They
-eliminate the race where a listener fires before the caller has linked the
-asset ID to its own rows.
-
-## Safety: Zero-Chunk Guard
-
-If the pipeline reaches the "indexed" state but `chunk_count` is 0, it automatically fails instead of reporting false success. This prevents silent data loss.
-
-## Check Ingestion Status
-
-The returned `$asset` always has a fresh `ingestion` relationship loaded — you can read the final state directly:
-
-```php
-$asset = $ingestion->ingestText('Hello world');
-
-// Safe — relationship is pre-loaded with final state
-$asset->ingestion->state;       // 'indexed' or 'failed'
-$asset->ingestion->chunk_count; // number of chunks indexed
-$asset->ingestion->error;       // null or error message
-```
-
-For assets loaded from the database later:
-
-```php
-$asset = Asset::with('ingestion')->find($id);
-$asset->ingestion->state;
-```
-
-## Queue Processing
-
-By default (`QUEUE_CONNECTION=sync`), ingestion runs inline. For production:
+- `QUEUE_CONNECTION=sync` still executes inline (Laravel default behavior).
+- For true async offload in production, use `database`, `redis`, etc. and run workers.
 
 ```env
 QUEUE_CONNECTION=database
@@ -152,40 +86,11 @@ QUEUE_CONNECTION=database
 php artisan queue:work
 ```
 
-**Important:** If using `sync` queue, large files may hit the 30-second PHP timeout. The jobs set `set_time_limit(0)` internally, but if you're behind a web server (nginx/Apache) with its own timeout, use a background queue instead.
-
-## Batch Embedding
-
-Chunks are embedded in batches using `EmbeddingProvider::embedMany()` instead of one-by-one. The bundled `OpenAiEmbedding` driver calls `Embeddings::for($texts)->generate()` directly with a batch size of 96, cutting embedding API calls by ~100x on large documents and avoiding rate-limit issues on OpenAI tier-1 keys.
-
-### Token counts on `EmbeddingsCompleted`
-
-Providers that implement the optional `embedManyWithUsage(): EmbeddingResult`
-method — `OpenAiEmbedding` does — report the provider's `usage.total_tokens`
-on the `EmbeddingsCompleted` event. Third-party providers that only implement
-the original `embedMany()` contract continue to work; `tokenCount` is reported
-as `0` for those. No contract changes, fully backward compatible.
-
 ## Supported File Types
 
-| Type | Mime | Required Package |
+| Type | MIME | Parser |
 |---|---|---|
-| Plain text (.txt, .md, .csv) | text/plain, text/markdown, text/csv | Built-in |
-| PDF (.pdf) | application/pdf | `composer require smalot/pdfparser` |
-| Word (.docx) | application/vnd.openxmlformats-... | `composer require phpoffice/phpword` |
-
-## Chunking Configuration
-
-```env
-LARAI_CHUNK_SIZE=512     # Words per chunk
-LARAI_CHUNK_OVERLAP=50   # Overlapping words between chunks
-```
-
-## Database Tables
-
-| Table | Purpose |
-|---|---|
-| `ai_documents` | Searchable documents with embeddings |
-| `ai_assets` | File metadata + scope |
-| `ai_chunks` | Text chunks linked to assets |
-| `ai_ingestions` | Pipeline state tracking |
+| Text | `text/plain`, `text/markdown`, `text/csv` | Built-in |
+| HTML | `text/html`, `application/xhtml+xml` | Built-in |
+| PDF | `application/pdf` | `smalot/pdfparser` |
+| DOCX | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | `phpoffice/phpword` |

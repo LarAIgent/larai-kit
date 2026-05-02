@@ -54,8 +54,29 @@ class ChatStreamResponse implements \IteratorAggregate, Responsable
         // its ->usage property after iteration finishes, so we read it here.
         if ($this->onComplete) {
             $usage = is_object($this->stream) ? ($this->stream->usage ?? null) : null;
-            ($this->onComplete)($this->fullText, $usage);
+            ($this->onComplete)($this->fullText, $usage, $this->sources);
         }
+    }
+
+    /**
+     * Chain an additional callback to run after streaming completes.
+     *
+     * Callback signature:
+     *   function (string $fullText, mixed $usage, array $sources): void
+     */
+    public function withOnComplete(callable $callback): static
+    {
+        $existing = $this->onComplete;
+
+        $this->onComplete = function (string $fullText, mixed $usage, array $sources) use ($existing, $callback) {
+            if ($existing) {
+                ($existing)($fullText, $usage, $sources);
+            }
+
+            $callback($fullText, $usage, $sources);
+        };
+
+        return $this;
     }
 
     /**

@@ -60,11 +60,17 @@ class PgVectorStore implements VectorStore
 
     public function delete(array $chunkIds): void
     {
+        $chunkIds = array_values(array_unique(array_map('intval', $chunkIds)));
+
         if (empty($chunkIds)) {
             return;
         }
 
-        Document::whereIn('id', $chunkIds)->delete();
+        Document::query()
+            ->whereIn('id', $chunkIds)
+            ->orWhereIn('source_meta->chunk_id', $chunkIds)
+            ->orWhereIn('source_meta->chunk_id', array_map('strval', $chunkIds))
+            ->delete();
     }
 
     public function isConfigured(): bool

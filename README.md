@@ -224,7 +224,10 @@ $result = $chat->sendMessage('How long do I have?', conversationId: $convo->id);
 public function stream(Request $request)
 {
     $chat = app(ChatService::class);
-    return $chat->streamMessage($request->input('message'));
+    return $chat->streamMessage($request->input('message'))
+        ->withOnComplete(function (string $fullText, mixed $usage, array $sources) {
+            // Optional: persist assistant output, counters, timestamps, etc.
+        });
     // Emits:  data: {"type":"text_delta","delta":"..."}  (per chunk)
     //         data: {"type":"sources","sources":[...]}    (at the end)
     //         data: {"type":"done"}
@@ -243,6 +246,9 @@ $asset = $ingestion->ingestText('Our return policy allows returns within 30 days
 
 // Ingest a file (PDF, DOCX, TXT)
 $asset = $ingestion->ingestFile($request->file('document'));
+
+// Ingest from an existing disk path (no UploadedFile required)
+$asset = $ingestion->ingestFromDisk('public', 'knowledge-bases/policy.pdf');
 
 // Ingest a URL (with SSRF protection for private networks)
 $asset = $ingestion->ingestUrl('https://example.com/docs/faq');
@@ -510,6 +516,15 @@ Or set `LARAI_TRACK_USAGE=true` to persist automatically to the `ai_usage` table
 ### Can I use LarAI Kit with an existing Laravel AI SDK app?
 
 Yes — LarAI Kit adds services without touching anything the SDK provides. Your existing `Agent` classes, tools, and `prompt()` calls keep working unchanged. LarAI Kit just gives you the RAG layer on top.
+
+---
+
+## v0.2.4 Notes
+
+- `IngestionService::ingestFromDisk($disk, $path, $scope)` is now available for re-index and recovery workflows.
+- `ChatStreamResponse::withOnComplete()` lets you chain post-stream persistence without rebuilding the SSE loop.
+- `ingestText()` and `ingestUrl()` now run through queued entry jobs for consistency with `ingestFile()`.
+- Terminal ingestion events (`AssetIndexed`, `AssetFailed`) are now aligned with transaction commit boundaries.
 
 ---
 

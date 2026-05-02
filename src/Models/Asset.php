@@ -5,6 +5,7 @@ namespace LarAIgent\AiKit\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use LarAIgent\AiKit\Jobs\DeleteAssetVectorsJob;
 
 class Asset extends Model
 {
@@ -28,6 +29,19 @@ class Asset extends Model
         'tags' => 'array',
         'scope' => 'array',
     ];
+
+    protected static function booted(): void
+    {
+        static::deleting(function (self $asset) {
+            $chunkIds = $asset->chunks()->pluck('id')->all();
+
+            if (empty($chunkIds)) {
+                return;
+            }
+
+            DeleteAssetVectorsJob::dispatch($chunkIds, (int) $asset->id)->afterCommit();
+        });
+    }
 
     public function chunks(): HasMany
     {

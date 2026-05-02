@@ -9,12 +9,11 @@ use LarAIgent\AiKit\Models\Ingestion;
 /**
  * Fired after an asset's pipeline terminates with state = "failed".
  *
- * Deferred via `afterResponse()` in a web request so listeners run after the
- * caller has committed. In CLI / queue-worker contexts it's equivalent to
- * immediate dispatch.
+ * Deferred to after-commit when a DB transaction is open so listeners observe
+ * committed state consistently in web, CLI, and queue-worker contexts.
  *
- * Prefer this over `IngestionStateChanged` when you only need to know about
- * terminal failures (for alerts, user notifications, retry logic).
+ * Prefer this over `IngestionStateChanged` when you only need terminal
+ * failures (alerts, notifications, retry orchestration).
  */
 class AssetFailed
 {

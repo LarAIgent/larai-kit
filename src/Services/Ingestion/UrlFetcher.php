@@ -7,6 +7,11 @@ use RuntimeException;
 
 class UrlFetcher
 {
+    public function assertSafe(string $url): void
+    {
+        $this->validateUrl($url);
+    }
+
     /**
      * Fetch URL content with security validation.
      *
@@ -14,7 +19,7 @@ class UrlFetcher
      */
     public function fetch(string $url): array
     {
-        $this->validateUrl($url);
+        $this->assertSafe($url);
 
         $timeout = (int) config('larai-kit.url_ingestion.timeout', 30);
         $maxRedirects = (int) config('larai-kit.url_ingestion.max_redirects', 5);
