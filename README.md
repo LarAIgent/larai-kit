@@ -1,4 +1,4 @@
-<img width="2388" height="1344" alt="readme-banner" src="https://github.com/user-attachments/assets/09d3f96f-347d-421d-94e4-03040f21e8aa" />
+<img width="2305" height="974" alt="readme-banner-slim" src="https://github.com/user-attachments/assets/74fe8672-0524-446e-acc7-ef9e7a72c347" />
 
 <br>
 
