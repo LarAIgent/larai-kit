@@ -1,8 +1,16 @@
+<img width="2388" height="1344" alt="readme-banner" src="https://github.com/user-attachments/assets/09d3f96f-347d-421d-94e4-03040f21e8aa" />
+
+<br>
+
+<div align="center">
+
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/laraigent/larai-kit.svg?style=flat-square)](https://packagist.org/packages/laraigent/larai-kit)
 [![Total Downloads](https://img.shields.io/packagist/dt/laraigent/larai-kit.svg?style=flat-square)](https://packagist.org/packages/laraigent/larai-kit)
 [![PHP Version](https://img.shields.io/packagist/php-v/laraigent/larai-kit.svg?style=flat-square)](https://packagist.org/packages/laraigent/larai-kit)
 [![Laravel 12 / 13](https://img.shields.io/badge/Laravel-12%20%7C%2013-ff2d20?style=flat-square&logo=laravel)](https://laravel.com)
 [![License](https://img.shields.io/packagist/l/laraigent/larai-kit.svg?style=flat-square)](LICENSE)
+
+</div>
 
 # LarAI Kit — Laravel RAG & AI Agent Toolkit
 
